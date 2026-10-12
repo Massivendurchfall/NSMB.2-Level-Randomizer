@@ -1,0 +1,25 @@
+Author: Juju
+
+Version: # Plugin version
+    Major: 0
+    Minor: 4
+    Revision: 0
+
+Targets: # Low TitleId of games which are compatibles with this plugin (0 for all)
+    - 0x0007AF00
+    - 0x0007AE00
+    - 0x0007AD00
+
+Title: NSMB2 Randomizer
+
+Summary: Randomizes the enemies of New Super Mario Bros. 2
+
+Description: |
+  Every level gets different enemies, driven by a seed.
+  Press Select to open the menu with all settings.
+
+Compatibility: Any
+
+MemorySize: 5MiB
+
+UsePrivateMemory: false

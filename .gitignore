@@ -1,0 +1,34 @@
+# Game data never goes into the repository
+game_dump/
+*.cia
+*.cxi
+*.3ds
+boot9.bin
+
+# Build output
+plugin/Build/
+build_host/
+*.elf
+*.3gx
+
+# Local tooling
+.venv/
+__pycache__/
+tools/spritedata.xml
+tools/emu_run.ps1
+tools/emu_cmd.ps1
+tools/capture_window.ps1
+tools/azahar_config.py
+tools/make_cxi.py
+tools/extract_cia.py
+tools/check_toolchain.sh
+tools/rev.py
+tools/scan_block8.py
+tools/sprite_info.py
+tools/course_stats.py
+
+tools/ck_*
+tools/emu_*.ps1
+tools/scan_timer.py
+Spiel-starten.bat
+release/
