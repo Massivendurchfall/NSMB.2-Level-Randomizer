@@ -17,7 +17,7 @@ Bosses are not part of the mix. Outside their arenas they stand still or break t
 
 <img src="docs/qr.png" alt="QR code for the latest release" width="200">
 
-The QR code and [this link](https://github.com/Massivendurchfall/NSMB.2-Randomizer/releases/latest/download/nsmb2-randomizer.zip) both lead to the latest `nsmb2-randomizer.zip`.
+The QR code and [this link](https://github.com/Massivendurchfall/NSMB.2-Randomizer-Plugin/releases/latest/download/nsmb2-randomizer.zip) both lead to the latest `nsmb2-randomizer.zip`.
 
 ## Install
 
