@@ -108,8 +108,9 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
         Fail(index, "counters in the result are off");
 }
 
-// With a fixed seed the shuffle has to be a permutation inside each class,
-// and levels outside the classes (towers, castles ...) must be left alone.
+// With a fixed seed the shuffle is a permutation inside each class. With a new roll on every
+// visit any level may come up, never the one handed out before, and a level with a secret exit
+// on an ordinary place loses that exit. Towers, castles and toad houses are always left alone.
 static void TestLevels()
 {
     const struct { const uint16_t *list; uint32_t count; } classes[] =
@@ -117,52 +118,92 @@ static void TestLevels()
         { Rando::kLevelsNormal, Rando::kLevelsNormalCount },
         { Rando::kLevelsSecret, Rando::kLevelsSecretCount },
     };
-    uint32_t moved = 0, total = 0;
+    auto isSecret = [](uint16_t code)
+    {
+        for (uint32_t k = 0; k < Rando::kLevelsSecretCount; ++k)
+            if (Rando::kLevelsSecret[k] == code)
+                return true;
+        return false;
+    };
+    auto isKnown = [&](uint16_t code)
+    {
+        for (uint32_t k = 0; k < Rando::kLevelsNormalCount; ++k)
+            if (Rando::kLevelsNormal[k] == code)
+                return true;
+        return isSecret(code);
+    };
+    uint32_t moved = 0, total = 0, secretOnSecret = 0, secretVisits = 0;
+    std::map<uint16_t, int> spread;
 
     for (uint32_t seed = 1; seed <= 50; ++seed)
-        for (int reroll = 0; reroll < 2; ++reroll)
+    {
+        Rando::Settings s;
+        uint32_t w = 0, n = 0;
+
+        Rando::DefaultSettings(s);
+        s.seed = seed;
+
+        s.rerollEachTry = 0;
+        for (const auto &c : classes)
         {
-            Rando::Settings s;
+            std::map<uint16_t, int> seen;
 
-            Rando::DefaultSettings(s);
-            s.seed = seed;
-            s.rerollEachTry = (uint8_t)reroll;
-            for (const auto &c : classes)
+            for (uint32_t i = 0; i < c.count; ++i)
             {
-                std::map<uint16_t, int> seen;
-
-                for (uint32_t i = 0; i < c.count; ++i)
+                if (!Rando::ShuffleLevel(s, 1, c.list[i] >> 8, c.list[i] & 0xFF, 0, w, n))
                 {
-                    uint32_t w = 0, n = 0;
-                    bool inClass = false;
-
-                    if (!Rando::ShuffleLevel(s, seed * 3 + i, c.list[i] >> 8, c.list[i] & 0xFF, w, n))
-                    {
-                        Fail(i, "level of a class was not shuffled");
-                        continue;
-                    }
-                    uint16_t out = (uint16_t)((w << 8) | n);
-
-                    for (uint32_t k = 0; k < c.count; ++k)
-                        inClass = inClass || c.list[k] == out;
-                    if (!inClass)
-                        Fail(i, "shuffle left its class");
-                    if (!reroll && seen[out]++)
-                        Fail(i, "shuffle is not a permutation");
-                    if (!reroll)
-                    {
-                        ++total;
-                        moved += out != c.list[i];
-                    }
+                    Fail(i, "level of a class was not shuffled");
+                    continue;
                 }
-            }
-            uint32_t w = 0, n = 0;
+                uint16_t out = (uint16_t)((w << 8) | n);
 
-            if (Rando::ShuffleLevel(s, 1, 1, 14, w, n) || Rando::ShuffleLevel(s, 1, 1, 16, w, n)
-                || Rando::ShuffleLevel(s, 1, 1, 20, w, n))
-                Fail(0, "tower, castle or toad house was shuffled");
+                if (isSecret(out) != isSecret(c.list[i]))
+                    Fail(i, "fixed shuffle left its class");
+                if (seen[out]++)
+                    Fail(i, "fixed shuffle is not a permutation");
+                if (Rando::DropSecretExit())
+                    Fail(i, "fixed shuffle asked to drop a secret exit");
+                ++total;
+                moved += out != c.list[i];
+            }
         }
-    std::printf("levels: %u of %u placements differ from the original\n", moved, total);
+
+        s.rerollEachTry = 1;
+        uint16_t last = 0;
+
+        for (uint32_t visit = 0; visit < 400; ++visit)
+        {
+            const auto &c = classes[visit % 2];
+            uint16_t node = c.list[(visit * 7 + seed) % c.count];
+
+            if (!Rando::ShuffleLevel(s, seed * 1000 + visit, node >> 8, node & 0xFF, last, w, n))
+            {
+                Fail(visit, "level of a class was not rolled");
+                continue;
+            }
+            uint16_t out = (uint16_t)((w << 8) | n);
+
+            if (!isKnown(out))
+                Fail(visit, "rolled a level outside the pool");
+            if (out == last)
+                Fail(visit, "the same level twice in a row");
+            if (Rando::DropSecretExit() != (isSecret(out) && !isSecret(node)))
+                Fail(visit, "secret exit handling is off");
+            if (isSecret(node))
+            {
+                ++secretVisits;
+                secretOnSecret += isSecret(out);
+            }
+            ++spread[out];
+            last = out;
+        }
+        if (Rando::ShuffleLevel(s, 1, 1, 14, 0, w, n) || Rando::ShuffleLevel(s, 1, 1, 16, 0, w, n)
+            || Rando::ShuffleLevel(s, 1, 1, 20, 0, w, n))
+            Fail(0, "tower, castle or toad house was shuffled");
+    }
+    std::printf("levels: fixed seed moves %u of %u, rolling reached %zu different levels, "
+                "secret places got a secret level in %u of %u visits\n", moved, total, spread.size(),
+                secretOnSecret, secretVisits);
 }
 
 // Item blocks trade contents within their block type: the same items before and after,

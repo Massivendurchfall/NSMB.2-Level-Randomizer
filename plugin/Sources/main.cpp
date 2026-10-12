@@ -160,7 +160,7 @@ namespace CTRPluginFramework
                 }
                 ++g_activity;
 
-                if (g_set.enabled && (g_set.enemies || g_set.levels) && size
+                if (g_set.enabled && (g_set.enemies || g_set.levels || Rando::DropSecretExit()) && size
                     && Rando::RandomizeCourse(course, size, g_course[index], kCourseCap, g_set,
                                               LevelSeed(g_levelKey), index, g_result[index]))
                 {
@@ -189,7 +189,7 @@ namespace CTRPluginFramework
 
                 g_askedLevel = static_cast<u16>((world << 8) | number);
                 if (g_set.enabled && g_set.levels
-                    && Rando::ShuffleLevel(g_set, RollNumber(), world, number, world, number))
+                    && Rando::ShuffleLevel(g_set, RollNumber(), world, number, g_givenLevel, world, number))
                 {
                     worldIndex = world - 1;
                     levelIndex = number - 1;
@@ -543,8 +543,8 @@ namespace CTRPluginFramework
                 "Gold Rings are gone while this is on: the game crashes when it has to turn "
                 "a swapped enemy into gold." + next);
             g_eLevels = Switch(g_set.levels,
-                "Entering a level loads a different one. Levels with a secret exit only trade places with "
-                "each other, towers, castles, toad houses and cannons stay put, so the map keeps working. "
+                "Entering a level loads a different one, any level can come up. Towers, castles, toad "
+                "houses and cannons stay put, so the map keeps working. "
                 "Checkpoint flags are gone while this is on, a checkpoint from another level would lead nowhere." + next);
             g_eItems = Switch(g_set.items,
                 "The power-up blocks of a level trade their contents, so the Star may be where the "
@@ -614,7 +614,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 6,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 7,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 

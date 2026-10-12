@@ -63,10 +63,15 @@ namespace Rando
     bool        RandomizeCourse(const uint8_t *course, uint32_t size, uint8_t *out, uint32_t outCap,
                                 const Settings &s, uint32_t levelSeed, uint32_t areaIndex, Result &res);
 
-    // Level shuffle. world and number are the parts of the file name "W-N.sarc".
+    // Level shuffle. world and number are the parts of the file name "W-N.sarc", lastGiven is
+    // the level handed out before ((world << 8) | number), which is not handed out again.
     // Returns false for levels that never move (towers, castles, toad houses, cannons).
-    bool        ShuffleLevel(const Settings &s, uint32_t tries, uint32_t world, uint32_t number,
+    bool        ShuffleLevel(const Settings &s, uint32_t tries, uint32_t world, uint32_t number, uint32_t lastGiven,
                              uint32_t &outWorld, uint32_t &outNumber);
+
+    // True if the level handed out last has a secret exit the map has no path for.
+    // RandomizeCourse then takes that goal pole out.
+    bool        DropSecretExit(void);
 
     // Shuffles the power-ups of the item blocks in a courseN_bgdatLn.bin, in place.
     // Blocks of the same type trade their contents, so the layer keeps exactly the items it had.

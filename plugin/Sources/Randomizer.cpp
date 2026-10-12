@@ -498,55 +498,90 @@ namespace Rando
 
     namespace
     {
-        bool    ShuffleIn(const uint16_t *list, uint32_t count, uint32_t salt, const Settings &s,
-                          uint32_t tries, uint16_t code, uint16_t &out)
+        bool    g_dropSecretExit = false;
+
+        bool    Contains(const uint16_t *list, uint32_t count, uint16_t code)
+        {
+            for (uint32_t i = 0; i < count; ++i)
+                if (list[i] == code)
+                    return true;
+            return false;
+        }
+
+        // One fixed permutation of a class per seed, so every level shows up exactly once
+        uint16_t    Permuted(const uint16_t *list, uint32_t count, uint32_t salt, uint32_t seed, uint16_t code)
         {
             uint16_t    perm[64];
-            uint32_t    index = count;
+            uint32_t    index = 0;
 
             if (count > 64)
-                return false;
+                return code;
             for (uint32_t i = 0; i < count; ++i)
             {
                 perm[i] = list[i];
                 if (list[i] == code)
                     index = i;
             }
-            if (index == count)
-                return false;
-
-            if (s.rerollEachTry)
-            {
-                out = list[Hash(s.seed, 0x1E7E1 + salt, tries * 64 + index) % count];
-                return true;
-            }
-
-            // one fixed permutation per seed, so every level shows up exactly once
             for (uint32_t k = count - 1; k > 0; --k)
             {
-                uint32_t    r = Hash(s.seed, 0x5EED + salt, k) % (k + 1);
+                uint32_t    r = Hash(seed, 0x5EED + salt, k) % (k + 1);
                 uint16_t    tmp = perm[k];
 
                 perm[k] = perm[r];
                 perm[r] = tmp;
             }
-            out = perm[index];
-            return true;
+            return perm[index];
         }
     }
 
-    bool    ShuffleLevel(const Settings &s, uint32_t tries, uint32_t world, uint32_t number,
+    bool    DropSecretExit(void)
+    {
+        return g_dropSecretExit;
+    }
+
+    bool    ShuffleLevel(const Settings &s, uint32_t tries, uint32_t world, uint32_t number, uint32_t lastGiven,
                          uint32_t &outWorld, uint32_t &outNumber)
     {
         uint16_t    code = static_cast<uint16_t>((world << 8) | number);
-        uint16_t    out = 0;
+        bool        normalNode = world <= 0xFF && number <= 0xFF && Contains(kLevelsNormal, kLevelsNormalCount, code);
+        bool        secretNode = world <= 0xFF && number <= 0xFF && Contains(kLevelsSecret, kLevelsSecretCount, code);
+        uint16_t    out = code;
 
-        if (world > 0xFF || number > 0xFF)
-            return false;
-        if (!ShuffleIn(kLevelsNormal, kLevelsNormalCount, 0, s, tries, code, out)
-            && !ShuffleIn(kLevelsSecret, kLevelsSecretCount, 1, s, tries, code, out))
+        g_dropSecretExit = false;
+        if (!normalNode && !secretNode)
             return false;
 
+        if (!s.rerollEachTry)
+        {
+            // The seed alone decides: levels trade places within their class, so every secret
+            // path on the map still has a level with a secret exit on it.
+            out = normalNode ? Permuted(kLevelsNormal, kLevelsNormalCount, 0, s.seed, code)
+                             : Permuted(kLevelsSecret, kLevelsSecretCount, 1, s.seed, code);
+        }
+        else
+        {
+            // A new roll on every visit: any level may come up anywhere. A place with a secret
+            // path draws a level that has a secret exit one time in three, so that path stays
+            // reachable. The level that came up last is skipped, nobody wants it twice in a row.
+            const uint32_t  total = kLevelsNormalCount + kLevelsSecretCount;
+            uint32_t        h = Hash(s.seed, 0x1E7E1, tries);
+            bool            secretOnly = secretNode && Hash(s.seed, 0x5EC2E7, tries) % 3 == 0;
+            uint32_t        count = secretOnly ? kLevelsSecretCount : total;
+
+            for (uint32_t step = 0; step < count; ++step)
+            {
+                uint32_t    i = (h + step) % count;
+
+                out = secretOnly ? kLevelsSecret[i]
+                                 : (i < kLevelsNormalCount ? kLevelsNormal[i] : kLevelsSecret[i - kLevelsNormalCount]);
+                if (out != lastGiven)
+                    break;
+            }
+        }
+
+        // A secret exit taken where the map has no secret path leads nowhere, so that goal is
+        // taken out when such a level lands on an ordinary place.
+        g_dropSecretExit = normalNode && Contains(kLevelsSecret, kLevelsSecretCount, out);
         outWorld = out >> 8;
         outNumber = out & 0xFF;
         return true;
@@ -737,6 +772,13 @@ namespace Rando
             uint16_t    id = Read16(spr);
             uint32_t    h = Hash(levelSeed, (areaIndex << 16) + i, 0xC0FFEE);
 
+            // goal pole with the red flag: nybble 4 marks the secret exit
+            if (id == 97 && g_dropSecretExit && (spr[11] >> 4))
+            {
+                Write16(spr + 4, 0xF000);
+                ++res.checkpoints;
+                continue;
+            }
             if (id == kCheckpointFlag)
             {
                 if (dropCheckpoints)
