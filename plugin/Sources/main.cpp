@@ -82,6 +82,7 @@ namespace CTRPluginFramework
         bool            g_resultValid[kAreaCount];
         u32             g_levelKey = 0;
         u32             g_tries = 0;
+        u32             g_sessionSalt = 0;  // differs from one start of the game to the next
         bool            g_loadedSinceName = true;
         u16             g_askedLevel = 0;   // (world << 8) | number the game asked for
         u16             g_givenLevel = 0;   // what it got instead
@@ -120,12 +121,21 @@ namespace CTRPluginFramework
             return 0;
         }
 
+        // With a new roll on every visit, the count of visits alone would repeat the same
+        // sequence after every start of the game. The moment of the first level load does not.
+        u32     RollNumber(void)
+        {
+            if (!g_sessionSalt)
+                g_sessionSalt = static_cast<u32>(svcGetSystemTick()) | 1;
+            return g_tries + g_sessionSalt;
+        }
+
         u32     LevelSeed(u32 salt)
         {
             u32 seed = g_set.seed * 0x9E3779B1u ^ salt;
 
             if (g_set.rerollEachTry)
-                seed += g_tries * 0x85EBCA6Bu;
+                seed += RollNumber() * 0x85EBCA6Bu;
             return seed;
         }
 
@@ -179,7 +189,7 @@ namespace CTRPluginFramework
 
                 g_askedLevel = static_cast<u16>((world << 8) | number);
                 if (g_set.enabled && g_set.levels
-                    && Rando::ShuffleLevel(g_set, g_tries, world, number, world, number))
+                    && Rando::ShuffleLevel(g_set, RollNumber(), world, number, world, number))
                 {
                     worldIndex = world - 1;
                     levelIndex = number - 1;
@@ -601,7 +611,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 1,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 2,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 
@@ -624,7 +634,10 @@ namespace CTRPluginFramework
             OSD::Notify("Randomizer: unsupported game version, staying off", Color::Red);
 
         menu->Run();
-        delete menu;
+
+        // Run only returns while the game is closing. The menu is deliberately not deleted:
+        // tearing it down frees the entries a second time and crashes a real console on exit,
+        // and the process is about to go away with all of its memory anyway.
         return (0);
     }
 }
