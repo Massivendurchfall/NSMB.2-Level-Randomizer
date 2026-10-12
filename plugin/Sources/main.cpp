@@ -547,8 +547,8 @@ namespace CTRPluginFramework
                 "each other, towers, castles, toad houses and cannons stay put, so the map keeps working. "
                 "Checkpoint flags are gone while this is on, a checkpoint from another level would lead nowhere." + next);
             g_eItems = Switch(g_set.items,
-                "Shuffles the power-ups inside blocks: Fire Flower, Super Leaf, Star and 1-Up. "
-                "Coins, beanstalks and Mini Mushrooms stay as they are." + next);
+                "The power-up blocks of a level trade their contents, so the Star may be where the "
+                "Fire Flower was. Coins, beanstalks and Mini Mushrooms stay as they are." + next);
             g_eMode = new MenuEntry("", nullptr, ChooseMode,
                 "Safe: walkers stay walkers, flyers stay flyers, swimmers stay swimmers.\n"
                 "Wild: Boos and other flyers also replace walkers.\n"
@@ -614,7 +614,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 5,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 6,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 

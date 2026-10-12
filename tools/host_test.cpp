@@ -165,79 +165,73 @@ static void TestLevels()
     std::printf("levels: %u of %u placements differ from the original\n", moved, total);
 }
 
-// Item blocks keep their block type, coins and friends are never touched,
-// and a second pass over the same data changes nothing.
+// Item blocks trade contents within their block type: the same items before and after,
+// Mini Mushrooms, coins and friends never move, and nothing but the object number changes.
 static void TestItems()
 {
-    static const uint16_t rows[3][6] = { { 6, 11, 7, 8, 10, 12 }, { 20, 21, 24, 26, 23, 22 }, { 32, 33, 37, 38, 35, 34 } };
-    static const uint16_t fixed[] = { 5, 9, 16, 17, 18, 19, 27, 28, 29, 30, 31, 36, 39, 40, 100 };
+    static const uint16_t rows[3][6] = { { 6, 11, 7, 8, 12, 0 }, { 20, 21, 24, 26, 22, 25 }, { 32, 33, 37, 38, 34, 0 } };
+    static const uint16_t fixed[] = { 5, 9, 10, 23, 35, 16, 17, 18, 19, 27, 28, 29, 30, 31, 36, 39, 40, 100 };
     uint32_t changed = 0, total = 0;
 
-    for (int extra = 0; extra < 2; ++extra)
-        for (uint32_t seed = 1; seed <= 20; ++seed)
+    for (uint32_t seed = 1; seed <= 40; ++seed)
+    {
+        std::vector<uint8_t> data;
+        std::vector<int> rowOf;
+        Rando::Settings s;
+
+        Rando::DefaultSettings(s);
+        auto add = [&](uint16_t id, int row)
         {
-            std::vector<uint8_t> data;
-            std::vector<int> rowOf;
-            Rando::Settings s;
+            uint8_t rec[16] = { 0 };
+            uint16_t x = (uint16_t)(rowOf.size() * 3), y = (uint16_t)(rowOf.size() * 7 % 50);
 
-            Rando::DefaultSettings(s);
-            s.itemsExtra = (uint8_t)extra;
-            auto add = [&](uint16_t id, int row)
-            {
-                uint8_t rec[16] = { 0 };
-                uint16_t x = (uint16_t)(rowOf.size() * 3), y = (uint16_t)(rowOf.size() * 7 % 50);
-
-                rec[0] = (uint8_t)id; rec[1] = (uint8_t)(id >> 8);
-                rec[2] = (uint8_t)x; rec[3] = (uint8_t)(x >> 8);
-                rec[4] = (uint8_t)y; rec[5] = (uint8_t)(y >> 8);
-                data.insert(data.end(), rec, rec + 16);
-                rowOf.push_back(row);
-            };
-            for (int rep = 0; rep < 8; ++rep)
-            {
-                for (int r = 0; r < 3; ++r)
-                    for (int i = 0; i < 6; ++i)
+            rec[0] = (uint8_t)id; rec[1] = (uint8_t)(id >> 8);
+            rec[2] = (uint8_t)x; rec[3] = (uint8_t)(x >> 8);
+            rec[4] = (uint8_t)y; rec[5] = (uint8_t)(y >> 8);
+            data.insert(data.end(), rec, rec + 16);
+            rowOf.push_back(row);
+        };
+        // a different mix for every seed, some rows left with a single kind or none
+        for (int r = 0; r < 3; ++r)
+            for (int i = 0; i < 6; ++i)
+                if (rows[r][i])
+                    for (uint32_t c = 0; c < (seed * (r + 2) + i * 5) % 4; ++c)
                         add(rows[r][i], r);
-                add(25, 1);
-                for (uint16_t id : fixed)
-                    add(id, -1);
-            }
-            data.push_back(0xFF);
-            data.push_back(0xFF);
+        for (uint16_t id : fixed)
+            add(id, -1);
+        data.push_back(0xFF);
+        data.push_back(0xFF);
 
-            std::vector<uint8_t> before = data;
+        std::vector<uint8_t> before = data;
+        std::map<uint16_t, int> balance;
 
-            changed += Rando::RandomizeItems(data.data(), (uint32_t)data.size(), s, seed);
-            for (size_t i = 0; i < rowOf.size(); ++i)
+        changed += Rando::RandomizeItems(data.data(), (uint32_t)data.size(), s, seed);
+        for (size_t i = 0; i < rowOf.size(); ++i)
+        {
+            uint16_t was = R16(&before[i * 16]), is = R16(&data[i * 16]);
+
+            ++total;
+            if (std::memcmp(&data[i * 16 + 2], &before[i * 16 + 2], 14) != 0)
+                Fail(i, "item shuffle touched more than the object number");
+            if (rowOf[i] < 0)
             {
-                uint16_t id = R16(&data[i * 16]);
-
-                ++total;
-                if (std::memcmp(&data[i * 16 + 2], &before[i * 16 + 2], 14) != 0)
-                    Fail(i, "item shuffle touched more than the object number");
-                // column 4 of a row is the Mini Mushroom block, which has to stay
-                if (rowOf[i] >= 0 && R16(&before[i * 16]) == rows[rowOf[i]][4])
-                {
-                    if (id != R16(&before[i * 16]))
-                        Fail(i, "a Mini Mushroom block was changed");
-                    continue;
-                }
-                if (rowOf[i] < 0)
-                {
-                    if (id != R16(&before[i * 16]))
-                        Fail(i, "a block without a power-up was changed");
-                    continue;
-                }
-                bool ok = false;
-
-                for (int k = 0; k < (extra ? 6 : 4); ++k)
-                    ok = ok || rows[rowOf[i]][k] == id;
-                if (!ok)
-                    Fail(i, "item left its block type or the allowed set");
+                if (is != was)
+                    Fail(i, "a block that is not part of the shuffle was changed");
+                continue;
             }
-            if (Rando::RandomizeItems(data.data(), (uint32_t)data.size(), s, seed) != 0)
-                Fail(0, "second item pass changed something");
+            bool sameRow = false;
+
+            for (int k = 0; k < 6; ++k)
+                sameRow = sameRow || (rows[rowOf[i]][k] && rows[rowOf[i]][k] == is);
+            if (!sameRow)
+                Fail(i, "item left its block type");
+            ++balance[was];
+            --balance[is];
         }
+        for (const auto &entry : balance)
+            if (entry.second != 0)
+                Fail(seed, "the level has other items than before");
+    }
     std::printf("items: %u of %u test blocks changed\n", changed, total);
 }
 

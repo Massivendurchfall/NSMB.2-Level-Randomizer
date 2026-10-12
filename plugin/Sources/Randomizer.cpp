@@ -548,40 +548,55 @@ namespace Rando
 
     uint32_t    RandomizeItems(uint8_t *bgdat, uint32_t size, const Settings &s, uint32_t seed)
     {
-        uint32_t    changed = 0;
+        const uint32_t  kMaxBlocks = 96;
+        uint32_t        changed = 0;
 
-        for (uint32_t off = 0; off + kTileObjectSize <= size; off += kTileObjectSize)
+        (void)s;
+
+        // One block type at a time: the power-up blocks of that type trade their contents.
+        // A block never receives an item the level did not already have. The game only seems
+        // to prepare the items a level was built with, anything else left the block empty.
+        for (uint32_t r = 0; r < sizeof(kItemRows) / sizeof(kItemRows[0]); ++r)
         {
-            uint8_t     *obj = bgdat + off;
-            uint16_t    id = Read16(obj);
+            const ItemRow   &row = kItemRows[r];
+            const uint16_t  ids[5] = { row.fire, row.leaf, row.star, row.oneUp, row.gold };
+            uint32_t        where[kMaxBlocks];
+            uint16_t        what[kMaxBlocks];
+            uint32_t        n = 0;
 
-            if (id == 0xFFFF)
-                break;
-
-            for (uint32_t r = 0; r < sizeof(kItemRows) / sizeof(kItemRows[0]); ++r)
+            for (uint32_t off = 0; off + kTileObjectSize <= size && n < kMaxBlocks; off += kTileObjectSize)
             {
-                const ItemRow   &row = kItemRows[r];
-                const uint16_t  all[6] = { row.fire, row.leaf, row.star, row.oneUp, row.mini, row.gold };
-                bool            match = (r == 1 && id == kBrickStarAlt);
+                uint16_t    id = Read16(bgdat + off);
+                bool        match = (r == 1 && id == kBrickStarAlt);
 
-                for (uint32_t i = 0; i < 6 && !match; ++i)
-                    match = all[i] == id;
-                if (!match)
-                    continue;
-                // some levels cannot be finished without the Mini Mushroom they hand out
-                if (id == row.mini)
+                if (id == 0xFFFF)
                     break;
-
-                // position decides, not the current content, which keeps this repeatable
-                uint32_t    pick = Hash(seed, Read16(obj + 2) | (Read16(obj + 4) << 16), 0x17E5);
-                uint16_t    to = all[pick % (s.itemsExtra ? 6 : 4)];
-
-                if (to != id)
+                // the Mini Mushroom is not in the list: some levels cannot be finished without it
+                for (uint32_t i = 0; i < 5 && !match; ++i)
+                    match = ids[i] == id;
+                if (match)
                 {
-                    Write16(obj, to);
+                    where[n] = off;
+                    what[n] = id;
+                    ++n;
+                }
+            }
+
+            for (uint32_t k = n; k > 1; --k)
+            {
+                uint32_t    j = Hash(seed, 0x17E5 + r, k) % k;
+                uint16_t    tmp = what[k - 1];
+
+                what[k - 1] = what[j];
+                what[j] = tmp;
+            }
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                if (Read16(bgdat + where[i]) != what[i])
+                {
+                    Write16(bgdat + where[i], what[i]);
                     ++changed;
                 }
-                break;
             }
         }
         return changed;

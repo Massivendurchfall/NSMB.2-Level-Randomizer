@@ -69,7 +69,7 @@ namespace Rando
                              uint32_t &outWorld, uint32_t &outNumber);
 
     // Shuffles the power-ups of the item blocks in a courseN_bgdatLn.bin, in place.
-    // The result only depends on seed and block position, so running it twice changes nothing.
+    // Blocks of the same type trade their contents, so the layer keeps exactly the items it had.
     // Blocks holding a Mini Mushroom are never changed, levels built around it need it.
     // Returns the number of blocks whose content changed.
     uint32_t    RandomizeItems(uint8_t *bgdat, uint32_t size, const Settings &s, uint32_t seed);

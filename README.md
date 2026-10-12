@@ -7,7 +7,7 @@ Nothing on the cartridge or in the installed game is modified, the plugin change
 
 - **Random enemies.** Every enemy is rolled on its own, and only into something that makes sense there: walkers on the ground, flyers above it, swimmers in the water. Safe keeps the three apart, Wild lets flyers replace walkers, Chaos adds Thwomps and Bullet Bills.
 - **Random levels.** Entering a level loads a different one. Levels with a secret exit only trade places with each other, and towers, castles, toad houses and cannons stay where they are, so the world map keeps working.
-- **Random items.** The power-ups inside blocks are shuffled between Fire Flower, Super Leaf, Star and 1-Up.
+- **Random items.** The power-up blocks of a level trade their contents, so the Star may be where the Fire Flower was.
 - **A new roll after every death**, or one fixed game per seed, your choice.
 - **Give up this level.** A shuffled game can strand you. This menu entry runs the timer down and takes you back to the map.
 
