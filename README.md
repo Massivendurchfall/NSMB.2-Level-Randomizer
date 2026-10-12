@@ -37,7 +37,7 @@ Developed against the European version 1.0 and tested in the Azahar emulator. It
 | Randomizer | Master switch |
 | Random enemies, levels, items | Each part on its own |
 | Enemy mix | Safe, Wild or Chaos |
-| New roll after every death | On: everything is rolled again each time you enter a level. Checkpoint flags are removed while levels are random, because a checkpoint from another level would lead nowhere. |
+| New roll after every death | On: everything is rolled again each time you enter a level. Off: the seed alone decides. |
 | Seed | The same seed gives the same game |
 | Give up this level | Way out of a level you cannot finish |
 | Show last level | What was changed in the level loaded last |
@@ -49,6 +49,7 @@ Every setting applies from the next level you enter. Each change is also written
 - An area never gets many more kinds of enemies than it was built with. The game has no memory for more: loading twice as many kinds made it hang in testing.
 - Blocks holding a Mini Mushroom, coins, beanstalks or a Mega Mushroom are never changed, some levels cannot be finished without them.
 - Chaos puts Thwomps and Bullet Bills where Goombas used to be. It is meant to be unfair.
+- Checkpoint flags are removed while levels are random. A checkpoint sends you back to a spot of the level it was taken in, and the same place on the map may load another level next time.
 - Gold Rings are removed while enemies are random. A ring makes the game draw every enemy with its gold model, swapped enemies have none, and the game crashes on that.
 - Things that never move and cannot be stomped (plants, Amps, Urchins) only replace each other, so a swap cannot seal a passage.
 

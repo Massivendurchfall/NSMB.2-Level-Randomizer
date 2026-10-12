@@ -544,7 +544,8 @@ namespace CTRPluginFramework
                 "a swapped enemy into gold." + next);
             g_eLevels = Switch(g_set.levels,
                 "Entering a level loads a different one. Levels with a secret exit only trade places with "
-                "each other, towers, castles, toad houses and cannons stay put, so the map keeps working." + next);
+                "each other, towers, castles, toad houses and cannons stay put, so the map keeps working. "
+                "Checkpoint flags are gone while this is on, a checkpoint from another level would lead nowhere." + next);
             g_eItems = Switch(g_set.items,
                 "Shuffles the power-ups inside blocks: Fire Flower, Super Leaf, Star and 1-Up. "
                 "Coins, beanstalks and Mini Mushrooms stay as they are." + next);
@@ -555,7 +556,7 @@ namespace CTRPluginFramework
                 "Fish stay in the water in every mode." + next);
             g_eReroll = Switch(g_set.rerollEachTry,
                 "On: enemies, level and items are rolled again every time you enter a level, so also after "
-                "every death. Checkpoint flags are gone while levels are random, they would lead nowhere.\n"
+                "every death.\n"
                 "Off: the game stays the same for as long as the seed stays the same.");
             g_eSeed = new MenuEntry("", nullptr, ChooseSeed,
                 "The seed decides every roll. The same seed gives the same game again.");
@@ -613,7 +614,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 4,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 5,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 

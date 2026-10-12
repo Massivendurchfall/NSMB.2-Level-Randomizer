@@ -630,9 +630,10 @@ namespace Rando
         Palette     palettes[SLOT_WATER + 1];
         bool        forcedUsed = false;
 
-        // A checkpoint taken in one level would send you to a place that does not exist in
-        // the next one, so with levels rolled anew on every try the flags go out of reach.
-        bool        dropCheckpoints = s.levels && s.rerollEachTry;
+        // A checkpoint sends you back to a spot of the level it was taken in. Once the same place
+        // on the map can load another level (a new roll, a changed seed), that spot may not exist
+        // there, so with random levels the flags go out of reach altogether.
+        bool        dropCheckpoints = s.levels != 0;
 
         // how many different swappable kinds and how many enemies each environment has in this area
         uint32_t    sourceKinds[SLOT_WATER + 1] = { 0, 0, 0 };
