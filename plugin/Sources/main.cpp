@@ -75,7 +75,9 @@ namespace CTRPluginFramework
         u32             g_nameFn = 0;
         u32             g_lookupFn = 0;
 
-        u8              g_course[kAreaCount][kCourseCap];
+        // The game reads course data a word at a time. A real console faults on an unaligned
+        // address (the emulator does not), so the copies must start on a word boundary.
+        alignas(8) u8   g_course[kAreaCount][kCourseCap];
         Rando::Result   g_result[kAreaCount];
         bool            g_resultValid[kAreaCount];
         u32             g_levelKey = 0;
@@ -599,7 +601,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 0,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 1,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 
