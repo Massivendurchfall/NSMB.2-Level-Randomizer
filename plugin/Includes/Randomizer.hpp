@@ -44,6 +44,7 @@ namespace Rando
         uint16_t total;         // sprites in the course
         uint16_t swapped;       // how many of them were swapped
         uint16_t checkpoints;   // checkpoint flags taken out of play
+        uint16_t rings;         // Gold Rings taken out of play
         uint16_t typesBefore;
         uint16_t typesAfter;
         uint8_t  mapCount;      // used entries in mapFrom/mapTo

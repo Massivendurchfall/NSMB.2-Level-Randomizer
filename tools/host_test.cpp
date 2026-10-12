@@ -91,8 +91,9 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
             if (IsFixed(id) && !IsFixed(R16(a)))
                 Fail(index, "something that never moves replaced a moving enemy");
         }
-        else if (id == 52 && R16(b + 4) == 0xF000 && std::memcmp(a, b, 4) == 0 && std::memcmp(a + 6, b + 6, 18) == 0)
-            ++flags;    // a checkpoint flag moved out of reach
+        else if ((id == 52 || id == 206) && R16(b + 4) == 0xF000 && std::memcmp(a, b, 4) == 0
+                 && std::memcmp(a + 6, b + 6, 18) == 0)
+            ++flags;    // a checkpoint flag or a Gold Ring moved out of reach
         else if (std::memcmp(a, b, 24) != 0)
             Fail(index, "untouched sprite was modified");
         for (uint32_t i = 0; i < uSize; i += 4)
@@ -103,7 +104,7 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
     }
     if (R16(out + sOff + count * 24) != 0xFFFF && (count + 1) * 24 <= sSize)
         Fail(index, "sprite terminator is missing");
-    if (changed != res.swapped || count != res.total || flags != res.checkpoints)
+    if (changed != res.swapped || count != res.total || flags != (uint32_t)res.checkpoints + res.rings)
         Fail(index, "counters in the result are off");
 }
 

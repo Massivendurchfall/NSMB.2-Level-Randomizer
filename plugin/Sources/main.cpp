@@ -539,8 +539,9 @@ namespace CTRPluginFramework
 
             g_eEnabled = Switch(g_set.enabled, "Master switch for everything below." + next);
             g_eEnemies = Switch(g_set.enemies,
-                "Every enemy is rolled on its own. An area gets a few more kinds than it was built with, "
-                "the game cannot handle many more." + next);
+                "Every enemy is rolled on its own, and only into something that fits the place. "
+                "Gold Rings are gone while this is on: the game crashes when it has to turn "
+                "a swapped enemy into gold." + next);
             g_eLevels = Switch(g_set.levels,
                 "Entering a level loads a different one. Levels with a secret exit only trade places with "
                 "each other, towers, castles, toad houses and cannons stay put, so the map keeps working." + next);
@@ -612,7 +613,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 3,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 4,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 

@@ -49,6 +49,7 @@ Every setting applies from the next level you enter. Each change is also written
 - An area never gets many more kinds of enemies than it was built with. The game has no memory for more: loading twice as many kinds made it hang in testing.
 - Blocks holding a Mini Mushroom, coins, beanstalks or a Mega Mushroom are never changed, some levels cannot be finished without them.
 - Chaos puts Thwomps and Bullet Bills where Goombas used to be. It is meant to be unfair.
+- Gold Rings are removed while enemies are random. A ring makes the game draw every enemy with its gold model, swapped enemies have none, and the game crashes on that.
 - Things that never move and cannot be stomped (plants, Amps, Urchins) only replace each other, so a swap cannot seal a passage.
 
 ## Building

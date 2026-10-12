@@ -19,6 +19,7 @@ namespace Rando
         const uint32_t  kMaxTypes = 128;
         const uint32_t  kMaxPool = 64;
         const uint16_t  kCheckpointFlag = 52;
+        const uint16_t  kGoldRing = 206;
         // The game hangs once an area lists too many different sprites: 44 did it, 39 ran fine,
         // the busiest original area has 36. Swaps stay below this total and never add more than
         // a handful of kinds to one area.
@@ -708,6 +709,15 @@ namespace Rando
             if (!s.enemies)
                 continue;
 
+            // While a Gold Ring is active the game draws every enemy with its gold model. An enemy
+            // that was swapped in has none, and the game crashes on it. The ring goes out of reach.
+            if (id == kGoldRing)
+            {
+                Write16(spr + 4, 0xF000);
+                ++res.rings;
+                continue;
+            }
+
             const Plant *plant = FindPlant(id);
 
             if (plant)
@@ -788,7 +798,7 @@ namespace Rando
             Record(res, id, dst->id);
         }
 
-        if (!res.swapped && !res.checkpoints)
+        if (!res.swapped && !res.checkpoints && !res.rings)
             return false;
 
         // Rebuild the load list: every kind now present, sorted ascending
