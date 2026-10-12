@@ -9,9 +9,9 @@ namespace Rando
 {
     enum Mode
     {
-        MODE_SAFE = 0,  // every kind stays in its environment (ground, air, water)
-        MODE_WILD = 1,  // flyers may also fill ground slots
-        MODE_CHAOS = 2  // anything goes anywhere, can get unfair
+        MODE_SAFE = 0,  // walkers, flyers and swimmers each stay among themselves
+        MODE_WILD = 1,  // flyers also take the place of walkers
+        MODE_CHAOS = 2  // Thwomps and Bullet Bills join in on land, can get unfair
     };
 
     struct Settings

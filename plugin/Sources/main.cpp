@@ -352,7 +352,7 @@ namespace CTRPluginFramework
             Keyboard    kb("Which enemies may replace which?",
                            { "Safe: walkers, flyers and swimmers stay apart",
                              "Wild: flyers also replace walkers",
-                             "Chaos: anything anywhere, can be unfair" });
+                             "Chaos: Thwomps and Bullet Bills join in" });
             int         choice = kb.Open();
 
             if (choice >= 0)
@@ -550,7 +550,8 @@ namespace CTRPluginFramework
             g_eMode = new MenuEntry("", nullptr, ChooseMode,
                 "Safe: walkers stay walkers, flyers stay flyers, swimmers stay swimmers.\n"
                 "Wild: Boos and other flyers also replace walkers.\n"
-                "Chaos: fish on land, Thwomps instead of Goombas. Can get unfair." + next);
+                "Chaos: Thwomps, Bullet Bills and Banzai Bills join in on land. Can get unfair.\n"
+                "Fish stay in the water in every mode." + next);
             g_eReroll = Switch(g_set.rerollEachTry,
                 "On: enemies, level and items are rolled again every time you enter a level, so also after "
                 "every death. Checkpoint flags are gone while levels are random, they would lead nowhere.\n"
@@ -611,7 +612,7 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 2,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 4, 3,
             "Randomizes enemies, levels and items of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.");
 

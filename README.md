@@ -5,7 +5,7 @@ Nothing on the cartridge or in the installed game is modified, the plugin change
 
 ## What it does
 
-- **Random enemies.** Every enemy is rolled on its own. Walkers, flyers and swimmers can stay apart (Safe), mix a little (Wild) or go anywhere (Chaos).
+- **Random enemies.** Every enemy is rolled on its own, and only into something that makes sense there: walkers on the ground, flyers above it, swimmers in the water. Safe keeps the three apart, Wild lets flyers replace walkers, Chaos adds Thwomps and Bullet Bills.
 - **Random levels.** Entering a level loads a different one. Levels with a secret exit only trade places with each other, and towers, castles, toad houses and cannons stay where they are, so the world map keeps working.
 - **Random items.** The power-ups inside blocks are shuffled between Fire Flower, Super Leaf, Star and 1-Up.
 - **A new roll after every death**, or one fixed game per seed, your choice.
@@ -48,7 +48,8 @@ Every setting applies from the next level you enter. Each change is also written
 
 - An area never gets many more kinds of enemies than it was built with. The game has no memory for more: loading twice as many kinds made it hang in testing.
 - Blocks holding a Mini Mushroom, coins, beanstalks or a Mega Mushroom are never changed, some levels cannot be finished without them.
-- Chaos puts fish on land and Thwomps where Goombas used to be. It is meant to be unfair.
+- Chaos puts Thwomps and Bullet Bills where Goombas used to be. It is meant to be unfair.
+- Things that never move and cannot be stomped (plants, Amps, Urchins) only replace each other, so a swap cannot seal a passage.
 
 ## Building
 

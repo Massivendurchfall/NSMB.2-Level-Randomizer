@@ -57,60 +57,64 @@ namespace Rando
             int8_t      feet;   // where its feet are below the sprite position, 16 per tile
             int8_t      centre; // where its body centre is below the sprite position
             uint8_t     weight; // how often it comes up compared to the others
+            uint8_t     fixed;  // stays where it is put and cannot be stomped
             const char  *name;
         };
 
         const Kind  kKinds[] =
         {
+            // Who may stand where follows what makes sense in the level: walkers on the ground,
+            // flyers above it, swimmers in the water. A fish on land or a Goomba dropping out of
+            // the sky is no fun, and neither is a walker at the bottom of the sea.
             // Ground enemies
-            { 135, SLOT_GROUND, { S, C, C },  16,   8, 4, "Goomba" },
-            { 136, SLOT_GROUND, { S, C, C },  16,   8, 3, "Bone Goomba" },
-            { 137, SLOT_GROUND, { W, C, C },  16,  12, 1, "Micro Goomba" },
-            { 139, SLOT_GROUND, { S, C, C },  16,   8, 2, "Goomba Tower" },
-            { 165, SLOT_GROUND, { S, C, C },  16,   4, 4, "Koopa Troopa" },
-            { 158, SLOT_GROUND, { S, C, C },  16,   8, 3, "Buzzy Beetle" },
-            { 232, SLOT_GROUND, { S, C, C },  16,   8, 3, "Spiny" },
-            { 110, SLOT_GROUND, { S, C, C },  16,   4, 3, "Dry Bones" },
-            { 111, SLOT_GROUND, { S, C, C },  48,  24, 1, "Big Dry Bones" },
-            {  29, SLOT_GROUND, { S, C, C },  16,   8, 2, "Bob-omb" },
-            {  33, SLOT_GROUND, { S, C, C },  32,  16, 2, "Hammer Bro" },
-            {  31, SLOT_GROUND, { S, C, C },  32,  16, 2, "Boomerang Bro" },
-            {  32, SLOT_GROUND, { S, C, C },  32,  16, 2, "Fire Bro" },
-            {  34, SLOT_GROUND, { S, C, C },  48,  24, 1, "Sledge Bro" },
-            { 213, SLOT_GROUND, { S, C, C },  16,   0, 2, "Pokey" },
-            {  99, SLOT_GROUND, { S, C, C },  16,   4, 2, "Wiggler" },
-            { 138, SLOT_GROUND, { S, W, C },  16,   4, 3, "Paragoomba" },
-            {  82, SLOT_GROUND, { S, C, C },  16,   8, 2, "Fire Snake" },
-            { 159, SLOT_GROUND, { W, C, C },  16,   8, 2, "Spike Top" },
-            { 175, SLOT_GROUND, { S, N, N },  32,  24, 2, "Piranha Plant" },
-            { 176, SLOT_GROUND, { W, N, N },  64,  40, 1, "Big Piranha Plant" },
-            { 177, SLOT_GROUND, { S, N, N },  32,  16, 2, "Fire Piranha Plant" },
-            { 178, SLOT_GROUND, { W, N, N },  64,  32, 1, "Big Fire Piranha Plant" },
-            { 179, SLOT_GROUND, { S, N, N },  32,  24, 2, "Bone Piranha Plant" },
-            { 180, SLOT_GROUND, { W, N, N },  64,  40, 1, "Big Bone Piranha Plant" },
+            { 135, SLOT_GROUND, { S, N, N },  16,   8, 4, 0, "Goomba" },
+            { 136, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Bone Goomba" },
+            { 137, SLOT_GROUND, { W, N, N },  16,  12, 1, 0, "Micro Goomba" },
+            { 139, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Goomba Tower" },
+            { 165, SLOT_GROUND, { S, N, N },  16,   4, 4, 0, "Koopa Troopa" },
+            { 158, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Buzzy Beetle" },
+            { 232, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Spiny" },
+            { 110, SLOT_GROUND, { S, N, N },  16,   4, 3, 0, "Dry Bones" },
+            { 111, SLOT_GROUND, { S, N, N },  48,  24, 1, 0, "Big Dry Bones" },
+            {  29, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Bob-omb" },
+            {  33, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Hammer Bro" },
+            {  31, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Boomerang Bro" },
+            {  32, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Fire Bro" },
+            {  34, SLOT_GROUND, { S, N, N },  48,  24, 1, 0, "Sledge Bro" },
+            { 213, SLOT_GROUND, { S, N, N },  16,   0, 2, 0, "Pokey" },
+            {  99, SLOT_GROUND, { S, N, N },  16,   4, 2, 0, "Wiggler" },
+            { 138, SLOT_GROUND, { S, N, N },  16,   4, 3, 0, "Paragoomba" },
+            {  82, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Fire Snake" },
+            { 159, SLOT_GROUND, { W, N, N },  16,   8, 2, 0, "Spike Top" },
+            { 175, SLOT_GROUND, { S, N, N },  32,  24, 2, 1, "Piranha Plant" },
+            { 176, SLOT_GROUND, { W, N, N },  64,  40, 1, 1, "Big Piranha Plant" },
+            { 177, SLOT_GROUND, { S, N, N },  32,  16, 2, 1, "Fire Piranha Plant" },
+            { 178, SLOT_GROUND, { W, N, N },  64,  32, 1, 1, "Big Fire Piranha Plant" },
+            { 179, SLOT_GROUND, { S, N, N },  32,  24, 2, 1, "Bone Piranha Plant" },
+            { 180, SLOT_GROUND, { W, N, N },  64,  40, 1, 1, "Big Bone Piranha Plant" },
             // Flyers
-            { 185, SLOT_AIR, { S, S, C },  16,   4, 3, "Koopa Paratroopa" },
-            { 228, SLOT_AIR, { W, S, W },  16,   8, 3, "Boo" },
-            { 229, SLOT_AIR, { W, S, W },  96,  64, 1, "Big Boo" },
-            { 140, SLOT_AIR, { W, S, C },  16,   8, 3, "Crowber" },
-            {   8, SLOT_AIR, { W, S, C },  16,   8, 3, "Swooper" },
-            { 113, SLOT_AIR, { W, S, C },  16,   8, 2, "Flame Chomp" },
-            { 184, SLOT_AIR, { W, S, C },  16,   4, 2, "Parabomb" },
-            {  16, SLOT_AIR, { W, S, W },  16,   8, 2, "Amp" },
-            // Water enemies
-            { 194, SLOT_WATER, { C, C, S },  16,   8, 4, "Cheep Cheep" },
-            { 195, SLOT_WATER, { C, C, S },  40,  16, 2, "Big Cheep Cheep" },
-            { 200, SLOT_WATER, { C, C, S },  16,   8, 3, "Spiny Cheep Cheep" },
-            {  95, SLOT_WATER, { C, C, S },  16,   8, 3, "Blooper" },
-            {  96, SLOT_WATER, { C, C, S },  16,   8, 2, "Blooper Nanny" },
-            { 240, SLOT_WATER, { C, C, S },  16,   8, 2, "Urchin" },
-            {  83, SLOT_WATER, { C, C, S },  16,   8, 3, "Fish Bone" },
-            {   3, SLOT_WATER, { N, N, W },  40,   8, 1, "Cheep Chomp" },
+            { 185, SLOT_AIR, { S, S, N },  16,   4, 3, 0, "Koopa Paratroopa" },
+            { 228, SLOT_AIR, { W, S, N },  16,   8, 3, 0, "Boo" },
+            { 229, SLOT_AIR, { W, S, N },  96,  64, 1, 0, "Big Boo" },
+            { 140, SLOT_AIR, { W, S, N },  16,   8, 3, 0, "Crowber" },
+            {   8, SLOT_AIR, { W, S, N },  16,   8, 3, 0, "Swooper" },
+            { 113, SLOT_AIR, { W, S, N },  16,   8, 2, 0, "Flame Chomp" },
+            { 184, SLOT_AIR, { W, S, N },  16,   4, 2, 0, "Parabomb" },
+            {  16, SLOT_AIR, { N, S, N },  16,   8, 2, 1, "Amp" },
+            // Water enemies, in the water and nowhere else
+            { 194, SLOT_WATER, { N, N, S },  16,   8, 4, 0, "Cheep Cheep" },
+            { 195, SLOT_WATER, { N, N, S },  40,  16, 2, 0, "Big Cheep Cheep" },
+            { 200, SLOT_WATER, { N, N, S },  16,   8, 3, 0, "Spiny Cheep Cheep" },
+            {  95, SLOT_WATER, { N, N, S },  16,   8, 3, 0, "Blooper" },
+            {  96, SLOT_WATER, { N, N, S },  16,   8, 2, 0, "Blooper Nanny" },
+            { 240, SLOT_WATER, { N, N, S },  16,   8, 2, 1, "Urchin" },
+            {  83, SLOT_WATER, { N, N, S },  16,   8, 3, 0, "Fish Bone" },
+            {   3, SLOT_WATER, { N, N, W },  40,   8, 1, 0, "Cheep Chomp" },
             // Replacements for chaos mode only
-            {  77, SLOT_NONE, { C, C, C },  48,  24, 2, "Thwomp" },
-            {  76, SLOT_NONE, { C, C, C },  88,  40, 1, "Big Thwomp" },
-            { 118, SLOT_NONE, { C, C, C },  16,   8, 2, "Bullet Bill" },
-            { 119, SLOT_NONE, { C, C, C },  48,  16, 1, "Banzai Bill" },
+            {  77, SLOT_NONE, { C, C, N },  48,  24, 2, 0, "Thwomp" },
+            {  76, SLOT_NONE, { C, C, N },  88,  40, 1, 0, "Big Thwomp" },
+            { 118, SLOT_NONE, { C, C, N },  16,   8, 2, 0, "Bullet Bill" },
+            { 119, SLOT_NONE, { C, C, N },  48,  16, 1, 0, "Banzai Bill" },
         };
         const uint32_t  kKindCount = sizeof(kKinds) / sizeof(kKinds[0]);
 
@@ -301,6 +305,9 @@ namespace Rando
         {
             if (slot != SLOT_GROUND)
                 return src.centre - dst.centre;
+            // a Thwomp resting on the floor has nowhere to fall, it hangs four tiles above it
+            if (dst.id == 77 || dst.id == 76)
+                return src.feet - dst.feet - 64;
             // flyers that end up on a ground slot hover one tile above it
             if (dst.home == SLOT_AIR)
                 return src.feet - dst.centre - 24;
@@ -372,6 +379,28 @@ namespace Rando
             }
             pal.count = want;
             pal.built = true;
+        }
+
+        // Something that never moves and cannot be stomped (a plant, an Amp, an Urchin) may only
+        // take the place of another such thing. Put where an enemy used to walk or swim, it can
+        // seal a narrow passage for good.
+        const Kind  *AvoidBlocking(const Kind &src, const Kind *picked, const Kind *const *choices, uint32_t n)
+        {
+            if (!picked || !picked->fixed || src.fixed)
+                return picked;
+
+            uint32_t    at = 0;
+
+            while (at < n && choices[at] != picked)
+                ++at;
+            for (uint32_t step = 1; step <= n; ++step)
+            {
+                const Kind  *other = choices[(at + step) % n];
+
+                if (!other->fixed)
+                    return other;
+            }
+            return nullptr;
         }
 
         void    AddType(uint16_t *types, uint32_t &count, uint16_t id)
@@ -735,7 +764,8 @@ namespace Rando
                     BuildPalette(pal, slot, s, levelSeed ^ (areaIndex * 0x9E3779B9u),
                                  sourceKinds[slot] + extraKinds[slot]);
                 if (pal.count)
-                    dst = pal.items[PickWeighted(pal.items, pal.count, h)];
+                    dst = AvoidBlocking(*src, pal.items[PickWeighted(pal.items, pal.count, h)],
+                                        pal.items, pal.count);
             }
             else
             {
@@ -743,7 +773,7 @@ namespace Rando
                 uint32_t    n = BuildPool(slot, s, id, pool);
 
                 if (n)
-                    dst = pool[PickWeighted(pool, n, Hash(levelSeed, 0x7A31, id))];
+                    dst = AvoidBlocking(*src, pool[PickWeighted(pool, n, Hash(levelSeed, 0x7A31, id))], pool, n);
             }
 
             if (!dst || dst->id == id)

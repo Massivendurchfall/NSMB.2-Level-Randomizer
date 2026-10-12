@@ -13,6 +13,28 @@ static uint16_t R16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 
 static int g_errors = 0;
 
+static bool OneOf(uint16_t id, const uint16_t *list, size_t n)
+{
+    for (size_t i = 0; i < n; ++i)
+        if (list[i] == id)
+            return true;
+    return false;
+}
+
+static bool IsSwimmer(uint16_t id)
+{
+    static const uint16_t ids[] = { 194, 195, 200, 95, 96, 240, 83, 3 };
+    return OneOf(id, ids, sizeof(ids) / sizeof(ids[0]));
+}
+
+static bool IsFixed(uint16_t id)
+{
+    // grounded and pipe Piranha Plants, Amp, Urchin
+    static const uint16_t ids[] = { 175, 176, 177, 178, 179, 180, 16, 240,
+                                    183, 171, 172, 167, 168, 181, 169, 173, 182, 170, 174 };
+    return OneOf(id, ids, sizeof(ids) / sizeof(ids[0]));
+}
+
 static void Fail(size_t course, const char *what)
 {
     if (++g_errors <= 20)
@@ -57,11 +79,17 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
         {
             int dy = (int)R16(b + 4) - (int)R16(a + 4);
 
-            if (dy < -130 || dy > 130)
+            if (dy < -160 || dy > 160)
                 Fail(index, "height correction out of range");
             ++changed;
             if (!Rando::SpriteName(id))
                 Fail(index, "unknown target kind");
+            // swaps have to make sense: swimmers stay in the water and nothing else gets in,
+            // and what never moves only replaces something that never moved either
+            if (IsSwimmer(id) != IsSwimmer(R16(a)))
+                Fail(index, "a swap crossed the water line");
+            if (IsFixed(id) && !IsFixed(R16(a)))
+                Fail(index, "something that never moves replaced a moving enemy");
         }
         else if (id == 52 && R16(b + 4) == 0xF000 && std::memcmp(a, b, 4) == 0 && std::memcmp(a + 6, b + 6, 18) == 0)
             ++flags;    // a checkpoint flag moved out of reach
