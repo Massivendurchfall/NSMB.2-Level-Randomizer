@@ -77,6 +77,9 @@ namespace Rando
     // Testing only: the first swappable enemy of a level turns into this ID, 0 switches it off
     void        SetForcedTarget(uint16_t id);
 
+    // Testing only: every question block becomes this object of the standard tileset, 0 switches it off
+    void        SetForcedItem(uint16_t object);
+
     const char  *SpriteName(uint16_t id);
 }
 

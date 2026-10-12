@@ -115,6 +115,7 @@ namespace Test
             Rando::Settings &s = *g_settings;
 
             if (key == "force") Rando::SetForcedTarget(static_cast<uint16_t>(value));
+            else if (key == "itemobj") Rando::SetForcedItem(static_cast<uint16_t>(value));
             else if (key == "mode") s.mode = static_cast<uint8_t>(value);
             else if (key == "perinst") s.perInstance = static_cast<uint8_t>(value);
             else if (key == "variety") s.variety = static_cast<uint8_t>(value);

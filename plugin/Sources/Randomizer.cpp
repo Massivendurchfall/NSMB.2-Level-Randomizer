@@ -164,6 +164,7 @@ namespace Rando
         const uint16_t  kBrickStarAlt = 25; // second brick block variant holding a star
 
         uint16_t    g_forced = 0;
+        uint16_t    g_forcedItem = 0;
 
         inline uint16_t Read16(const uint8_t *p)
         {
@@ -460,6 +461,11 @@ namespace Rando
         s.writeLog = 1;     // unused by the plugin now, the log is always written
     }
 
+    void    SetForcedItem(uint16_t object)
+    {
+        g_forcedItem = object;
+    }
+
     void    SetForcedTarget(uint16_t id)
     {
         g_forced = id;
@@ -552,6 +558,24 @@ namespace Rando
         uint32_t        changed = 0;
 
         (void)s;
+
+        // testing: question blocks are objects 30 to 40 of the standard tileset
+        if (g_forcedItem)
+        {
+            for (uint32_t off = 0; off + kTileObjectSize <= size; off += kTileObjectSize)
+            {
+                uint16_t    id = Read16(bgdat + off);
+
+                if (id == 0xFFFF)
+                    break;
+                if (id >= 30 && id <= 40 && id != g_forcedItem)
+                {
+                    Write16(bgdat + off, g_forcedItem);
+                    ++changed;
+                }
+            }
+            return changed;
+        }
 
         // One block type at a time: the power-up blocks of that type trade their contents.
         // A block never receives an item the level did not already have. The game only seems
