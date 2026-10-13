@@ -99,6 +99,10 @@ The plugin hooks six functions of the game:
 
 No game files are included in this repository.
 
+## Bugs
+
+Made by L61r on Discord. If you found a bug, send me a message there or open an issue here, and attach `nsmb2rando.log` from the plugin folder if you can.
+
 ## Credits
 
 - [CTRPluginFramework](https://gitlab.com/thepixellizeross/ctrpluginframework) and the [blank template](https://github.com/PabloMK7/CTRPluginFramework-BlankTemplate) by Nanquitas and PabloMK7

@@ -130,6 +130,10 @@ namespace CTRPluginFramework
         const u32   kConfigVersion = 14;
         const char  *kConfigFile = "nsmb2rando.cfg";
         const char  *kLogFile = "nsmb2rando.log";
+        const char  *kSeenFile = "nsmb2rando.seen";     // exists once the note below has been shown
+        const u32   kWelcomeTick = 420;                 // frames into the first start, about seven seconds
+        const char  *kMadeBy = "Made by L61r on Discord.\n\nFound a bug? Send me a message there, and attach "
+                               "the file nsmb2rando.log from the plugin folder if you can.";
 
         struct ConfigFile
         {
@@ -158,6 +162,7 @@ namespace CTRPluginFramework
 
         void            AppendLog(const std::string &text);
         int             SavedLives(void);
+        void            Welcome(void);
 
         // seconds since the plugin started, every log entry carries it
         u32     Uptime(void)
@@ -1060,6 +1065,10 @@ namespace CTRPluginFramework
                 SaveConfig();
             }
 
+            // once the game has been drawing for a few seconds, not in the self test
+            if (g_ticks == kWelcomeTick && !Test::Active())
+                Welcome();
+
             // twice a second: how low do the pools get while a level is played
             if ((++g_ticks & 31) == 0)
             {
@@ -1162,6 +1171,24 @@ namespace CTRPluginFramework
                 AppendLog(MemoryReport());
         }
 
+        // The very first time the game is started with the plugin: who made this and where bug
+        // reports go. It can be read again any time in the menu, under "About".
+        void    Welcome(void)
+        {
+            if (File::Exists(kSeenFile) == 1)
+                return;
+            MessageBox("NSMB2 Randomizer", std::string(kMadeBy) + "\n\nPress Select in the game to open the menu.")();
+
+            File    file(kSeenFile, File::RWC | File::TRUNCATE);
+
+            file.Write("1", 1);
+        }
+
+        void    ShowAbout(MenuEntry *entry)
+        {
+            MessageBox("NSMB2 Randomizer", kMadeBy)();
+        }
+
         MenuEntry   *Switch(u8 &flag, const std::string &note)
         {
             MenuEntry   *entry = new MenuEntry("", nullptr, ToggleEntry, note);
@@ -1227,6 +1254,7 @@ namespace CTRPluginFramework
                                   "Clears the list of finished levels, so every level can come up again.");
             menu += new MenuEntry("Show last level", nullptr, ShowLastLevel,
                                   "Lists what was changed in the level loaded last.");
+            menu += new MenuEntry("About", nullptr, ShowAbout, "Who made this and where bug reports go.");
             RefreshNames();
         }
 
@@ -1276,14 +1304,15 @@ namespace CTRPluginFramework
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 5, 0,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 5, 1,
             "Randomizes enemies and levels of New Super Mario Bros. 2 based on a seed.\n"
-            "Every setting applies from the next level on.");
+            "Every setting applies from the next level on.\n\n"
+            "Made by L61r on Discord. Found a bug? Send me a message there.");
 
         g_startTick = svcGetSystemTick();
         menu->SynchronizeWithFrame(true);
         LoadConfig();
-        AppendLog("Plugin 0.5.0 started\n");
+        AppendLog("Plugin 0.5.1 started\n");
         Test::Init(g_set);
         Test::SetGiveUp(RunDownTimer);
         Test::SetLives(SetLives999);
