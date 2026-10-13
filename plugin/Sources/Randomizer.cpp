@@ -17,25 +17,42 @@ namespace Rando
         const uint32_t  kBlockSprites = 7;
         const uint32_t  kBlockUsed = 8;
         const uint32_t  kBlockZones = 9;
+        const uint32_t  kBlockEntrances = 6;
+        const uint32_t  kEntranceSize = 24;     // x and y as u16 in pixels, the zone's ID at +13
         const uint32_t  kZoneSize = 28;     // x, y, width, height as u16 in pixels, the zone's ID at +12
         const uint32_t  kSpriteSize = 24;
         const uint32_t  kMaxTypes = 128;
         const uint32_t  kMaxPool = 64;
         const uint16_t  kCheckpointFlag = 52;
         const uint16_t  kGoldRing = 206;
-        // Item rain, not offered in the menu yet: placed like this the spawners throw nothing,
-        // how they are triggered still has to be found out.
-        // Sprite 252 is the item spawner the Toad Houses use: it throws a number of
-        // items of one sort, one after the other. Its settings: nybble 4 the item, 6 how it comes
-        // out (1 = thrown), 7 a random extra delay, 8 the delay, 9 how many, 10 the speed,
-        // 11 the direction. A row of them sits along the top of every zone, another row every
-        // few screens further down, so wherever the camera is something comes down.
+        // Item rain. The items are made by the plugin while the level runs (see main.cpp), and an
+        // item can only be made on the thread of the game. Sprite 252, the item spawner of the
+        // Toad Houses, gets it there: the game calls a spawner that is at work once a frame, and
+        // the plugin has a hook on that call. So the rain puts spawners of its own into the level,
+        // marked with RAIN_MARK, which never throw anything themselves.
         const uint16_t  kItemSpawner = 252;
-        const uint32_t  kMaxRain = 40;                  // spawners per area
-        const uint32_t  kRainStep = 11 * 16;            // distance between two spawners of a row
-        const uint32_t  kRainRows = 13 * 16;            // distance between two rows
-        // Super Mushroom, Fire Flower, Super Leaf, Gold Flower, Mini Mushroom, Star, Mega Mushroom, 1-Up
-        const uint8_t   kRainItems[] = { 1, 2, 4, 5, 6, 7, 9, 11 };
+        // A spawner does nothing until its event (byte 6 of the sprite) is switched on. Sprite 86
+        // does that for the event in its own byte 6 as soon as Mario is in the zone it sits in.
+        // The rain uses an event number no sprite of the level uses.
+        const uint16_t  kZoneEnter = 86;
+        const uint32_t  kMaxRain = 40;                  // spawners and controllers per area
+        const uint32_t  kMaxZones = 16;
+        // The game hands the sprite list out in runs, one per zone number from 0 to 63: it counts
+        // the sprites that carry each number and gives zone 0 the first so many, zone 1 the next
+        // ones and so on, whatever numbers those sprites really carry (LoadArea of the game).
+        const uint32_t  kZoneNumbers = 64;
+        const uint32_t  kMaxSpots = 256;
+        const uint32_t  kRainCellW = 12 * 16;           // a stretch of the level that gets one spawner
+        const uint32_t  kRainCellH = 9 * 16;
+        // Spawner and controller come without models, and the items are in memory in every level.
+        // All but the Mega Mushroom: it is only there where sprite 288 is on the load list, which
+        // does nothing but load it together with Mega Mario. That costs memory like a new kind
+        // of enemy does, so the plan of the level decides whether it comes along. Making one
+        // where it is not loaded sends the game to address 0.
+        const uint16_t  kMegaLoader = 288;
+        // Actor memory in KB that new kinds of enemies leave alone when it rains: every item in
+        // the air is an actor of its own, some 10 KB, and there can be 48 of them
+        const uint16_t  kRainReserve = 480;
         const uint32_t  kMaxLoaded = 256;
         // New kinds a level gets at most, however much memory it has to spare
         const uint32_t  kMaxFreshKinds = 16;
@@ -164,7 +181,6 @@ namespace Rando
         const uint32_t  kPlantCount = sizeof(kPlants) / sizeof(kPlants[0]);
 
         uint16_t    g_forced = 0;
-        uint32_t    g_rainProbe = 0;
         uint16_t    g_extraKinds[8];
         uint32_t    g_extraKindCount = 0;
 
@@ -345,6 +361,7 @@ namespace Rando
             uint32_t    areaKey[MAX_AREAS];     // CRC of each course file the plan was made from
             uint16_t    loaded[kMaxLoaded];     // every sprite ID an area of the level lists
             uint32_t    loadedCount;
+            uint8_t     rainEvent;              // event number the item rain may use, 0 if none is free
         };
 
         LevelState  g_level;
@@ -531,13 +548,8 @@ namespace Rando
         s.swapPlants = 1;
         s.notify = 0;
         s.autosave = 1;
-        s.noRepeats = 1;
+        s.noRepeats = 0;
         s.itemRain = 0;
-    }
-
-    void    SetRainProbe(uint32_t settings)
-    {
-        g_rainProbe = settings;
     }
 
     void    AddExtraKind(uint16_t id)
@@ -813,6 +825,7 @@ namespace Rando
         LevelState  &lv = g_level;
         uint32_t    heads[SLOT_COUNT];
         uint32_t    fixedHeads[SLOT_COUNT];     // those of them that never move, see AvoidBlocking
+        uint64_t    usedEvents = 1;             // event numbers the sprites of the level refer to, 0 means none
 
         std::memset(&lv, 0, sizeof(lv));
         std::memset(heads, 0, sizeof(heads));
@@ -851,6 +864,12 @@ namespace Rando
                 if (id == 0xFFFF)
                     break;
 
+                // bytes 6 and 7 are where a sprite names the events it waits for or sets off
+                if (spr[6] < 64)
+                    usedEvents |= 1ull << spr[6];
+                if (spr[7] < 64)
+                    usedEvents |= 1ull << spr[7];
+
                 uint32_t    slot = SourceSlot(spr, id, s);
 
                 if (slot < SLOT_COUNT)
@@ -864,11 +883,22 @@ namespace Rando
             }
         }
         lv.plan.key = lv.areaKey[0];
+        for (uint32_t e = 63; e >= 32 && !lv.rainEvent; --e)
+            if (!((usedEvents >> e) & 1))
+                lv.rainEvent = static_cast<uint8_t>(e);
+
+        // The item rain needs nothing loaded, only an event number of its own. A level that
+        // loads the Mega Mushroom anyway has it in its rain for free.
+        if (s.itemRain && lv.rainEvent)
+        {
+            lv.plan.rain = 1;
+            lv.plan.mega = HasId(lv.loaded, lv.loadedCount, kMegaLoader);
+        }
 
         // A level that is not in the table keeps to the kinds it has, those cost nothing
         const LevelRoom *room = FindRoom(lv.plan.key);
 
-        if (!room || !s.enemies)
+        if (!room || (!s.enemies && !lv.plan.rain))
             return;
         lv.plan.known = 1;
 
@@ -886,16 +916,16 @@ namespace Rando
         uint32_t    vramReserve = kReserve[MEM_VRAM_A] + kReserve[MEM_VRAM_B];
         uint32_t    vramLeft = room->both > vramReserve ? room->both - vramReserve : 0;
 
-        // The item rain comes first if it was asked for: the spawner and the items it throws
-        // have to be loaded like any other kind. A level without room for them stays dry.
-        if (s.itemRain)
-        {
-            const KindCost  *cost = FindCost(kItemSpawner);
-            bool            fits = cost != nullptr && !HasId(lv.loaded, lv.loadedCount, kItemSpawner);
+        if (lv.plan.rain)
+            left[MEM_ACTOR] = left[MEM_ACTOR] > kRainReserve ? left[MEM_ACTOR] - kRainReserve : 0;
 
-            // a level that has the spawner anyway gets its rain for free
-            if (HasId(lv.loaded, lv.loadedCount, kItemSpawner))
-                lv.plan.rain = 1;
+        // The Mega Mushroom of the item rain comes first if the level has room for what it
+        // loads. Without that room everything else rains.
+        if (lv.plan.rain && !lv.plan.mega)
+        {
+            const KindCost  *cost = FindCost(kMegaLoader);
+            bool            fits = cost != nullptr;
+
             for (uint32_t r = 0; fits && r < MEM_VRAM_A; ++r)
                 fits = cost->cost[r] <= left[r];
             if (fits && vramPooled)
@@ -904,7 +934,7 @@ namespace Rando
                 fits = cost->cost[MEM_VRAM_A] <= left[MEM_VRAM_A] && cost->cost[MEM_VRAM_B] <= left[MEM_VRAM_B];
             if (fits)
             {
-                lv.plan.rain = 1;
+                lv.plan.mega = 1;
                 for (uint32_t m = 0; m < MEM_COUNT; ++m)
                 {
                     spent[m] += cost->cost[m];
@@ -916,7 +946,7 @@ namespace Rando
         bool        closed[SLOT_COUNT];
 
         std::memset(closed, 0, sizeof(closed));
-        while (lv.plan.freshCount < kMaxFreshKinds && lv.plan.freshCount < MAX_FRESH)
+        while (s.enemies && lv.plan.freshCount < kMaxFreshKinds && lv.plan.freshCount < MAX_FRESH)
         {
             // The next new kind goes to the environment with the most enemies per kind it can
             // draw on. Compared without dividing.
@@ -1170,75 +1200,121 @@ namespace Rando
             Record(res, id, dst->id);
         }
 
-        // Item rain: spawners along the top of every zone, and further rows below in tall zones
+        // Item rain: what it adds to the sprites of the area. A sprite is only awake near the
+        // camera, so the level is cut into stretches and every stretch with something in it gets
+        // a spawner, right where that thing stands: wherever the level has anything to show,
+        // one of them is awake and the plugin gets its turn.
         static uint8_t  rain[kMaxRain][kSpriteSize];
         uint32_t        rainCount = 0;
         uint32_t        zoneOff = Read32(course + kBlockZones * 8);
         uint32_t        zoneSize = Read32(course + kBlockZones * 8 + 4);
+        bool            mega = usePlan && g_level.plan.mega;
 
-        // testing: a few spawners right next to where the level starts, their settings (bytes 8
-        // to 10 of the sprite) come from the probe value, each one with another item
-        if (g_rainProbe && s.itemRain && areaIndex == 0)
+        if (s.itemRain && usePlan && g_level.plan.rain && zoneOff + zoneSize <= size)
         {
-            uint32_t        entOff = Read32(course + 6 * 8), entSize = Read32(course + 6 * 8 + 4);
-            uint32_t        setOff = Read32(course + 1 * 8);
-            uint8_t         start = course[setOff + 0x10];
+            // one controller per zone switches the spawners of that zone on
+            uint8_t     zoneIds[kMaxZones];
+            uint32_t    zones = 0;
 
-            for (uint32_t e = 0; (e + 1) * 24 <= entSize; ++e)
-            {
-                const uint8_t   *ent = course + entOff + e * 24;
-
-                if (ent[8] != start)
-                    continue;
-                // top byte of the probe value: how many spawners (high nybble, 0 = four) and
-                // which item (low nybble, 0 = a different one each)
-                uint32_t    many = (g_rainProbe >> 28) ? (g_rainProbe >> 28) : 4;
-                uint32_t    item = (g_rainProbe >> 24) & 0xF;
-
-                for (uint32_t i = 0; i < many && i < 4; ++i)
-                {
-                    uint8_t *spr = rain[rainCount++];
-
-                    std::memset(spr, 0, kSpriteSize);
-                    Write16(spr, kItemSpawner);
-                    Write16(spr + 2, static_cast<uint16_t>(Read16(ent) + 64 + i * 64));
-                    Write16(spr + 4, static_cast<uint16_t>(Read16(ent + 2) > 96 ? Read16(ent + 2) - 96 : 0));
-                    spr[11] = static_cast<uint8_t>((item ? item : kRainItems[i * 2 % sizeof(kRainItems)]) << 4);
-                    spr[10] = static_cast<uint8_t>(g_rainProbe >> 16);
-                    spr[9] = static_cast<uint8_t>(g_rainProbe >> 8);
-                    spr[8] = static_cast<uint8_t>(g_rainProbe);
-                    spr[16] = ent[13];
-                }
-                break;
-            }
-        }
-        else if (s.itemRain && usePlan && g_level.plan.rain && zoneOff + zoneSize <= size)
-        {
-            for (uint32_t z = 0; (z + 1) * kZoneSize <= zoneSize; ++z)
+            for (uint32_t z = 0; (z + 1) * kZoneSize <= zoneSize && zones < kMaxZones && rainCount < kMaxRain; ++z)
             {
                 const uint8_t   *zone = course + zoneOff + z * kZoneSize;
-                uint32_t        zx = Read16(zone), zy = Read16(zone + 2);
-                uint32_t        zw = Read16(zone + 4), zh = Read16(zone + 6);
 
-                for (uint32_t y = zy + 32; y == zy + 32 || y + 5 * 16 < zy + zh; y += kRainRows)
+                if (zone[12] >= kZoneNumbers)
+                    continue;
+
+                uint8_t         *ctrl = rain[rainCount++];
+
+                zoneIds[zones++] = zone[12];
+                std::memset(ctrl, 0, kSpriteSize);
+                Write16(ctrl, kZoneEnter);
+                Write16(ctrl + 2, static_cast<uint16_t>(Read16(zone) + 32));
+                Write16(ctrl + 4, static_cast<uint16_t>(Read16(zone + 2) + 32));
+                ctrl[6] = g_level.rainEvent;
+                ctrl[16] = zone[12];
+            }
+
+            struct Spot
+            {
+                uint16_t    x, y;
+                uint8_t     zone;
+            };
+            static Spot spots[kMaxSpots];
+            uint32_t    spotCount = 0;
+
+            auto        note = [&](uint32_t x, uint32_t y, uint8_t zone)
+            {
+                uint32_t    z = 0;
+
+                // without a zone there is no controller, the spawner would never start
+                while (z < zones && zoneIds[z] != zone)
+                    ++z;
+                if (z == zones)
+                    return;
+                for (uint32_t i = 0; i < spotCount; ++i)
+                    if (spots[i].zone == zone && spots[i].x / kRainCellW == x / kRainCellW
+                        && spots[i].y / kRainCellH == y / kRainCellH)
+                        return;
+                if (spotCount < kMaxSpots)
                 {
-                    for (uint32_t x = zx + 4 * 16; x + 4 * 16 < zx + zw && rainCount < kMaxRain; x += kRainStep)
-                    {
-                        uint32_t    h = Hash(levelSeed, 0x4A1B00 + (areaIndex << 8) + rainCount, x + y);
-                        uint8_t     *spr = rain[rainCount++];
-
-                        std::memset(spr, 0, kSpriteSize);
-                        Write16(spr, kItemSpawner);
-                        // a little off the grid, so the rows do not look like rows
-                        Write16(spr + 2, static_cast<uint16_t>(x + (h >> 8) % 48));
-                        Write16(spr + 4, static_cast<uint16_t>(y));
-                        spr[11] = static_cast<uint8_t>(kRainItems[h % sizeof(kRainItems)] << 4);
-                        spr[10] = static_cast<uint8_t>((1 << 4) | 6);                   // thrown, uneven rhythm
-                        spr[9] = static_cast<uint8_t>((4 << 4) | 12);                   // some delay, twelve items
-                        spr[8] = static_cast<uint8_t>((((h >> 16) & 1) ? 4 : 0) << 4 | (((h >> 17) & 1) ? 2 : 0));
-                        spr[16] = zone[12];
-                    }
+                    spots[spotCount].x = static_cast<uint16_t>(x);
+                    spots[spotCount].y = static_cast<uint16_t>(y);
+                    spots[spotCount++].zone = zone;
                 }
+            };
+
+            uint32_t    entOff = Read32(course + kBlockEntrances * 8);
+            uint32_t    entSize = Read32(course + kBlockEntrances * 8 + 4);
+
+            // entrances first: where Mario comes in, the rain should be awake for sure
+            for (uint32_t e = 0; entOff + entSize <= size && (e + 1) * kEntranceSize <= entSize; ++e)
+            {
+                const uint8_t   *ent = course + entOff + e * kEntranceSize;
+
+                note(Read16(ent), Read16(ent + 2), ent[13]);
+            }
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const uint8_t   *spr = course + sprOff + i * kSpriteSize;
+
+                note(Read16(spr + 2), Read16(spr + 4), spr[16]);
+            }
+
+            // in the order of the level, so that leaving some out thins them evenly
+            for (uint32_t i = 1; i < spotCount; ++i)
+            {
+                Spot        spot = spots[i];
+                uint32_t    key = (static_cast<uint32_t>(spot.zone) << 24) | (static_cast<uint32_t>(spot.x) << 8) | (spot.y >> 8);
+                uint32_t    j = i;
+
+                while (j > 0 && ((static_cast<uint32_t>(spots[j - 1].zone) << 24)
+                                 | (static_cast<uint32_t>(spots[j - 1].x) << 8) | (spots[j - 1].y >> 8)) > key)
+                {
+                    spots[j] = spots[j - 1];
+                    --j;
+                }
+                spots[j] = spot;
+            }
+
+            uint32_t    room = kMaxRain - rainCount;
+            uint32_t    use = spotCount < room ? spotCount : room;
+
+            for (uint32_t k = 0; k < use; ++k)
+            {
+                const Spot  &spot = spots[spotCount <= room ? k : k * spotCount / room];
+                uint8_t     *spr = rain[rainCount++];
+
+                std::memset(spr, 0, kSpriteSize);
+                Write16(spr, kItemSpawner);
+                Write16(spr + 2, spot.x);
+                Write16(spr + 4, spot.y);
+                spr[6] = g_level.rainEvent;
+                // Settings as a Toad House has them, a mushroom, thrown, fifteen of them. They
+                // never come to anything: the mark makes the plugin keep the spawner from throwing.
+                spr[11] = static_cast<uint8_t>((1 << 4) | RAIN_MARK);
+                spr[10] = static_cast<uint8_t>((1 << 4) | 3);
+                spr[9] = static_cast<uint8_t>((15 << 4) | 15);
+                spr[16] = spot.zone;
             }
         }
 
@@ -1272,15 +1348,47 @@ namespace Rando
         uint32_t    tail = sprSize - count * kSpriteSize;
         uint32_t    rainSize = (count + rainCount) * kSpriteSize + tail;
 
-        if (rainCount && newOff + ((rainSize + 3) & ~3u) + newSize + 4 <= outCap)
+        if (rainCount && newOff + ((rainSize + 3) & ~3u) + newSize + 12 <= outCap)
         {
-            std::memcpy(out + newOff, out + sprOff, count * kSpriteSize);
-            std::memcpy(out + newOff + count * kSpriteSize, rain, rainCount * kSpriteSize);
-            std::memcpy(out + newOff + (count + rainCount) * kSpriteSize, course + sprOff + count * kSpriteSize, tail);
+            // Every sprite of the rain goes to the end of the run of its zone. Behind the whole
+            // list they would make the runs longer and shift every later one: sprites would turn
+            // up in the wrong zone or not at all, a tower would stand there without its water.
+            uint32_t    perZone[kZoneNumbers];
+            uint8_t     *dst = out + newOff;
+            uint32_t    src = 0;
+
+            std::memset(perZone, 0, sizeof(perZone));
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                uint8_t zone = out[sprOff + i * kSpriteSize + 16];
+
+                if (zone < kZoneNumbers)
+                    ++perZone[zone];
+            }
+            for (uint32_t z = 0; z < kZoneNumbers; ++z)
+            {
+                std::memcpy(dst, out + sprOff + src * kSpriteSize, perZone[z] * kSpriteSize);
+                dst += perZone[z] * kSpriteSize;
+                src += perZone[z];
+                for (uint32_t r = 0; r < rainCount; ++r)
+                {
+                    if (rain[r][16] != z)
+                        continue;
+                    std::memcpy(dst, rain[r], kSpriteSize);
+                    dst += kSpriteSize;
+                }
+            }
+            // what the game gives to no zone, and the end mark the old list closed with
+            std::memcpy(dst, out + sprOff + src * kSpriteSize, (count - src) * kSpriteSize);
+            dst += (count - src) * kSpriteSize;
+            std::memcpy(dst, course + sprOff + count * kSpriteSize, tail);
             Write32(out + kBlockSprites * 8, newOff);
             Write32(out + kBlockSprites * 8 + 4, rainSize);
             res.rain = static_cast<uint16_t>(rainCount);
             AddType(types, typeCount, kItemSpawner);
+            AddType(types, typeCount, kZoneEnter);
+            if (mega)
+                AddType(types, typeCount, kMegaLoader);
             newSize = typeCount * 4;
             newOff += rainSize;
             std::memset(out + newOff, 0, ((newOff + 3) & ~3u) - newOff);

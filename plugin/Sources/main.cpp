@@ -1,6 +1,7 @@
 #include <3ds.h>
 #include <CTRPluginFramework.hpp>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -70,6 +71,128 @@ namespace CTRPluginFramework
             0xE3510000, 0x012FFF1E, 0xE92D41F0, 0xE1A04000, 0xE280500C, 0xE1A07001, 0xE1A00005,
             kAnyWord,   0xE5946040, 0xE3A08000
         };
+        // void ItemSpawner::Throw(ItemSpawner *self)
+        // The item spawner (sprite 252, the one of the Toad Houses) while it is at work, called
+        // once a frame. The item rain has spawners of its own in the level, told by a mark in
+        // their settings, and this call is where the plugin takes them over: they never throw,
+        // they only give the plugin a turn on the thread of the game once a frame. Nowhere else
+        // could it make an item.
+        const u32   kThrowEur = 0x003EF1B4;
+        const u32   kThrowPattern[] =
+        {
+            0xE92D4030, 0xE2804A01, 0xE1A05000, 0xE594003C, 0xE24DD044, 0xE3500000, 0x12400001, kAnyWord,
+            0xE5940024, 0xE3A01000, 0xE2852034
+        };
+        const u32   kSpawnerSettings = 0x17C;   // bytes 8 to 11 of the sprite as one number
+
+        // void *CreateItem(ItemMgr *mgr, const float *position, u32 settings, u32 zero, u32 item)
+        // Makes an item, mgr is not used. item: 0 Super Mushroom, 1 Fire Flower, 2 Star, 3 1-Up,
+        // 4 Mini Mushroom, 5 Mega Mushroom, 6 Super Leaf, 7 Gold Flower. Bits 24 to 28 of the
+        // settings say how it comes into the level. 7 is the way of the reserve item: it blinks
+        // for a moment where it was made, then falls and is an ordinary item from there on. Every
+        // item knows that one. A spawner by itself uses 4, thrown, and the Super Leaf has no
+        // answer to that: it hangs in the air and cannot be taken.
+        const u32   kCreateItemEur = 0x002933B4;
+        const u32   kCreateItemPattern[] =
+        {
+            0xE92D4010, 0xE24DD040, 0xE3A00000, 0xE59DC048, kAnyWord,   0xE58D000C, 0xE58D0028, 0xE084408C
+        };
+        const u32   kItemModeDrop = 7;
+
+        // Where the game drops the reserve item, at Mario's x and two pixels above the screen.
+        // Only looked up for the address its first instruction loads: a pointer to the object
+        // that knows what the screen shows. In there, as floats in the coordinates of the level
+        // (x to the right, y up, so the y of a sprite with a minus): the left edge at +0x74, the
+        // right one at +0x7C, the top at +0x80, the bottom at +0x88.
+        const u32   kReserveDropEur = 0x002678D8;
+        const u32   kReserveDropPattern[] =
+        {
+            0xE59F0094, 0xED9F0A25, 0xEDDF0A25, 0xE281105C, 0xE5902000, 0xE5940034, 0xED921A20, 0xE58D0000,
+            0xE28D0004, 0xEE310A00, 0xEC800A02
+        };
+        const u32   kReserveDropLiteral = 8 + 0x94;
+        const u32   kScreenLeft = 0x74;
+        const u32   kScreenRight = 0x7C;
+        const u32   kScreenTop = 0x80;
+        const u32   kScreenBottom = 0x88;
+
+        // An item is an actor of some 10 KB that is gone after about eleven seconds if nobody
+        // takes it, and nothing in the game limits how many there are. So the rain keeps count,
+        // and it looks at the actor heap before every item.
+        const u32   kRainAlive = 48;            // items of the rain there are at most at a time
+        const u32   kRainLife = 14;             // seconds until an item is gone for sure
+        const u32   kRainGapMs = 200;           // from one item to the next, plus up to kRainGapExtraMs
+        const u32   kRainGapExtraMs = 300;
+        const u32   kRainFloor = 512 * 1024;    // free bytes of the actor heap below which nothing comes
+        const u32   kRainItemBytes = 10 * 1024;
+        const u32   kRainLogSize = 64;
+        const u32   kRainDrySeconds = 4;
+
+        struct RainItem
+        {
+            u8          index;      // what CreateItem calls it
+            u8          weight;
+            const char  *name;
+        };
+        // Out of 108 items: 24 each of mushroom, flower and leaf, 14 Mini Mushrooms, 9 1-Ups,
+        // 8 Stars, 3 Mega Mushrooms and 2 Gold Flowers.
+        // The Mega Mushroom comes last: it is left out where the level does not load it.
+        const RainItem  kRainItems[] =
+        {
+            { 0, 24, "Super Mushroom" }, { 1, 24, "Fire Flower" }, { 6, 24, "Super Leaf" }, { 3, 9, "1-Up" },
+            { 4, 14, "Mini Mushroom" }, { 2, 8, "Star" }, { 7, 2, "Gold Flower" }, { 5, 3, "Mega Mushroom" }
+        };
+        const u32   kRainItemCount = sizeof(kRainItems) / sizeof(kRainItems[0]);
+        // Difficulty. Mario's form is a number: 0 small, 1 big, 2 fire, 3 mini, 4 raccoon, 5 mega,
+        // 6 gold. Three places of the game deal with it:
+        //
+        // void PlayerMgr::CreatePlayers(PlayerMgr *self, StartInfo *info)
+        // Makes Mario and Luigi when a level starts. info has 24 bytes for each of them from
+        // +0x20 on: the first one says whether he is there, the one at +8 is the form he starts in.
+        //
+        // void FormChanges::Start(FormChanges *self, Player *player)
+        // A player keeps two forms: the one he has, at +0x11F1, and the one he is to have, at
+        // +0x457D. Whoever wants him changed (an item, a hit, a checkpoint) writes the second one
+        // and calls this, which sets the change going. The game does not rest until the two are
+        // the same again. So this is where a change is refused: the second form is put back and
+        // the call goes no further. Forcing the form at the very end instead, where it is
+        // written, leaves the two apart for good, and Mario hangs in a change that never ends.
+        //
+        // u32 Item::Collect(Item *self, u32 how, u32 player), 1 if the player took the item
+        // Mushrooms, both flowers, the leaf, Mini and Mega Mushroom come through here. Stars and
+        // 1-Ups have ways of their own.
+        const u32   kCreatePlayersEur = 0x0044DFC4;
+        const u32   kCreatePlayersPattern[] =
+        {
+            0xE92D47F0, 0xE1A05001, 0xE3A01000, 0xE24DD040, 0xE5801040, 0xE5801044, 0xE5801048, 0xE580104C
+        };
+        const u32   kStartInfoPlayers = 0x20;
+        const u32   kStartInfoPlayerSize = 24;
+        const u32   kStartInfoForm = 8;
+        const u32   kStartChangeEur = 0x002A33E0;
+        const u32   kStartChangePattern[] =
+        {
+            0xE1A02000, 0xE59F0048, 0xE5922114, 0xE5900000, 0xE5903020, 0xE3530000
+        };
+        const u32   kPlayerForm = 0x11F1;
+        const u32   kPlayerWantedForm = 0x457D;
+        const u32   kCollectEur = 0x0041B7B4;
+        const u32   kCollectPattern[] =
+        {
+            0xE92D5FF0, 0xE1A05002, 0xE1B07001, 0xE1A09000, 0xE3A08000, 0x03A00000, kAnyWord,   0xE2896A01
+        };
+        const u32   kFormSmall = 0;
+        const u32   kFormMega = 5;
+        const u32   kFormGold = 6;
+
+        enum
+        {
+            DIFF_NORMAL,
+            DIFF_EASY,      // always Gold Mario, a hit does not take it away
+            DIFF_HARDCORE,  // always small Mario, power-ups cannot be taken
+            DIFF_COUNT
+        };
+
         // where the 3DS maps the two banks
         const u32   kVramA = 0x1F000000;
         const u32   kVramB = 0x1F300000;
@@ -127,7 +250,8 @@ namespace CTRPluginFramework
         const u32   kWorldCount = 9;        // file names use world numbers 1 to 9
         const u32   kCourseCap = 0x4000;    // the largest course file in the game is 9900 bytes
         const u32   kConfigMagic = 0x32444E52;
-        const u32   kConfigVersion = 14;
+        const u32   kConfigVersion = 15;
+        const u32   kConfigVersionBefore = 14;  // still read: the file was shorter then, see ConfigFile
         const char  *kConfigFile = "nsmb2rando.cfg";
         const char  *kLogFile = "nsmb2rando.log";
         const char  *kSeenFile = "nsmb2rando.seen";     // exists once the note below has been shown
@@ -141,12 +265,62 @@ namespace CTRPluginFramework
             u32             version;
             Rando::Settings settings;
             Rando::Progress progress;
+            // new with version 15, a file of version 14 ends right before this
+            u8              difficulty;
+            u8              unused[3];
         };
+        const u32   kConfigSizeBefore = 40;
+        // Whatever is added has to go behind what a file already holds, and the version has to
+        // go up with it: a file whose parts have moved reads as garbage.
+        static_assert(offsetof(ConfigFile, difficulty) == kConfigSizeBefore && sizeof(ConfigFile) == 44,
+                      "the layout of the settings file changed");
 
         Rando::Settings g_set;
         Rando::Progress g_progress;             // the levels that were finished already
         volatile bool   g_configDue = false;    // the config has to be written, done outside the hooks
+        u8              g_difficulty = DIFF_NORMAL;
+        Hook            g_createPlayersHook, g_startChangeHook, g_collectHook;
+        u32             g_createPlayersFn = 0;
+        u32             g_startChangeFn = 0;
+        u32             g_collectFn = 0;
+        bool            g_difficultyHooked = false;     // the three hooks are in place right now
         Hook            g_loaderHook, g_nameHook, g_lookupHook, g_timeHook, g_vramAllocHook, g_vramFreeHook;
+        Hook            g_throwHook;
+        u32             g_throwFn = 0;
+        u32             g_createItemFn = 0;
+        u32             g_screenHolder = 0;     // where the game keeps its pointer to the screen object
+        volatile bool   g_rainOn = false;       // the level that is running has item rain
+        bool            g_rainMega = false;     // and it loads the Mega Mushroom
+        u64             g_rainTimes[kRainAlive];    // when the last items of the rain were made
+        u32             g_rainNext = 0;
+        u64             g_rainLast = 0;         // when the last one came, and how long to wait for the next
+        u64             g_rainGap = 0;
+        u64             g_rainHeapAt = 0;       // when the actor heap was looked at last, and what it had free
+        u32             g_rainHeap = 0;
+        u64             g_rainHeldAt = 0;
+        u32             g_rainSeed = 1;
+        volatile u64    g_rainFrameAt = 0;      // the last time a spawner of the rain reported a frame
+        volatile u32    g_rainThrown = 0;       // items of the rain in this level so far
+        volatile u32    g_rainFull = 0;         // seconds in which the rain waited for items to go away
+        volatile u32    g_rainLow = 0;          // seconds in which it waited for memory
+        volatile u32    g_rainBlind = 0;        // times the screen could not be read
+        u32             g_rainCounts[kRainItemCount];
+        bool            g_rainDry = false;      // no frame from the rain for a while, already in the log
+        u32             g_livesSeen = 0xFFFFFFFF;
+
+        // Every item of the rain goes into the log. The hook only notes it down here, the plugin
+        // loop writes the lines: files are not touched on the thread of the game.
+        struct RainDrop
+        {
+            u32 time;
+            u32 number;     // which item of the level it is
+            s32 x, y, left, right, top, bottom;
+            u32 freeKb;
+            u8  item;
+        };
+        RainDrop        g_rainLog[kRainLogSize];
+        volatile u32    g_rainLogHead = 0;
+        u32             g_rainLogTail = 0;
         u32             g_timeFn = 0;
         u32             g_vramAllocFn = 0;
         u32             g_vramFreeFn = 0;
@@ -161,6 +335,8 @@ namespace CTRPluginFramework
         u64             g_startTick = 0;
 
         void            AppendLog(const std::string &text);
+        bool            RainReady(void);
+        void            ApplyDifficulty(void);
         int             SavedLives(void);
         void            Welcome(void);
 
@@ -198,6 +374,8 @@ namespace CTRPluginFramework
 
         MenuEntry       *g_eEnabled, *g_eEnemies, *g_eLevels, *g_eCastles, *g_eMode, *g_eReroll, *g_eSeed;
         MenuEntry       *g_eAutosave, *g_eNoRepeats;
+        MenuEntry       *g_eRain = nullptr;     // only there if the game is one the rain can be held back in
+        MenuEntry       *g_eDifficulty = nullptr;   // only there if the game is one the plugin knows its way around
         volatile bool   g_inLevel = false;          // between the start of a visit and the way back to the map
         volatile int    g_livesAtEntry = -1;
         volatile bool   g_saveThisVisit = false;    // not after towers and castles, there the game asks by itself
@@ -362,8 +540,22 @@ namespace CTRPluginFramework
                     std::memset(g_resultValid, 0, sizeof(g_resultValid));
                     std::memset(g_original, 0, sizeof(g_original));
                     ++g_loads;
+                    // the rain is made by the plugin, a game it has not found its way into has none
+                    if (!RainReady())
+                        g_set.itemRain = 0;
                     if (g_set.enabled && size)
                         PlanWholeLevel(course, size);
+                    g_rainOn = g_set.enabled && size && Rando::LastPlan().rain;
+                    g_rainMega = g_rainOn && Rando::LastPlan().mega;
+                    g_rainThrown = g_rainFull = g_rainLow = g_rainBlind = 0;
+                    std::memset(g_rainCounts, 0, sizeof(g_rainCounts));
+                    std::memset(g_rainTimes, 0, sizeof(g_rainTimes));
+                    g_rainDry = false;
+                    g_rainFrameAt = 0;
+                    g_rainSeed = (LevelSeed(g_levelKey) ^ static_cast<u32>(svcGetSystemTick())) | 1;
+                    // the first item a moment after the level has come up
+                    g_rainLast = svcGetSystemTick();
+                    g_rainGap = static_cast<u64>(2) * SYSCLOCK_ARM11;
                 }
                 ++g_activity;
 
@@ -371,7 +563,7 @@ namespace CTRPluginFramework
 
                 if (!Test::AreaEnemies(index))
                     set.enemies = 0;
-                if (set.enabled && (set.enemies || set.levels || Rando::DropSecretExit()) && size
+                if (set.enabled && (set.enemies || set.levels || set.itemRain || Rando::DropSecretExit()) && size
                     && Rando::RandomizeCourse(course, size, g_course[index], kCourseCap, set,
                                               LevelSeed(g_levelKey), index, g_result[index]))
                 {
@@ -505,14 +697,23 @@ namespace CTRPluginFramework
 
             Rando::DefaultSettings(g_set);
             std::memset(&g_progress, 0, sizeof(g_progress));
-            if (file.IsOpen() && file.Read(&cfg, sizeof(cfg)) == 0 && cfg.magic == kConfigMagic
-                && cfg.version == kConfigVersion)
+            std::memset(&cfg, 0, sizeof(cfg));
+            g_difficulty = DIFF_NORMAL;
+            if (file.IsOpen() && file.Read(&cfg, kConfigSizeBefore) == 0 && cfg.magic == kConfigMagic
+                && (cfg.version == kConfigVersion || cfg.version == kConfigVersionBefore))
             {
                 g_set = cfg.settings;
                 g_progress = cfg.progress;
+                if (cfg.version == kConfigVersionBefore)
+                {
+                    // "No finished level twice" used to be on unless it was switched off. It
+                    // is off by default now, and settings from before get that default once.
+                    g_set.noRepeats = 0;
+                    g_configDue = true;
+                }
+                else if (file.Read(&cfg.difficulty, sizeof(cfg) - kConfigSizeBefore) == 0 && cfg.difficulty < DIFF_COUNT)
+                    g_difficulty = cfg.difficulty;
             }
-            // the item rain is not finished, only the self test may switch it on
-            g_set.itemRain = 0;
         }
 
         void    SaveConfig(void)
@@ -524,6 +725,7 @@ namespace CTRPluginFramework
             cfg.version = kConfigVersion;
             cfg.settings = g_set;
             cfg.progress = g_progress;
+            cfg.difficulty = g_difficulty;
 
             File    file(kConfigFile, File::RWC | File::TRUNCATE);
 
@@ -559,6 +761,14 @@ namespace CTRPluginFramework
             g_eReroll->Name() = std::string("New roll after every death: ") + OnOff(g_set.rerollEachTry);
             g_eAutosave->Name() = std::string("Autosave after a level: ") + OnOff(g_set.autosave);
             g_eNoRepeats->Name() = std::string("No finished level twice: ") + OnOff(g_set.noRepeats);
+            if (g_eRain)
+                g_eRain->Name() = std::string("Item rain: ") + OnOff(g_set.itemRain);
+            if (g_eDifficulty)
+            {
+                static const char *const names[] = { "Normal", "Easy", "Hardcore" };
+
+                g_eDifficulty->Name() = std::string("Difficulty: ") + names[g_difficulty < DIFF_COUNT ? g_difficulty : 0];
+            }
             g_eSeed->Name() = "Seed: " + std::to_string(g_set.seed);
         }
 
@@ -588,6 +798,22 @@ namespace CTRPluginFramework
             if (choice >= 0)
             {
                 g_set.mode = static_cast<u8>(choice);
+                Changed();
+            }
+        }
+
+        void    ChooseDifficulty(MenuEntry *entry)
+        {
+            Keyboard    kb("How hard should it be?",
+                           { "Normal: the game as it is",
+                             "Easy: always Gold Mario, a hit does not take it away",
+                             "Hardcore: always small Mario, power-ups cannot be taken" });
+            int         choice = kb.Open();
+
+            if (choice >= 0 && choice < DIFF_COUNT)
+            {
+                g_difficulty = static_cast<u8>(choice);
+                ApplyDifficulty();
                 Changed();
             }
         }
@@ -894,6 +1120,288 @@ namespace CTRPluginFramework
             return total;
         }
 
+        bool    DifficultyReady(void)
+        {
+            return g_createPlayersFn && g_startChangeFn;
+        }
+
+        // The form Mario is kept in, -1 if the game decides
+        int     ForcedForm(void)
+        {
+            if (!g_set.enabled || !DifficultyReady())
+                return -1;
+            return g_difficulty == DIFF_EASY ? static_cast<int>(kFormGold)
+                 : g_difficulty == DIFF_HARDCORE ? static_cast<int>(kFormSmall) : -1;
+        }
+
+        void    CreatePlayersHook(u8 *self, u8 *info)
+        {
+            int form = ForcedForm();
+
+            for (u32 i = 0; info && form >= 0 && i < 2; ++i)
+            {
+                u8  *player = info + kStartInfoPlayers + i * kStartInfoPlayerSize;
+
+                if (player[0])
+                    player[kStartInfoForm] = static_cast<u8>(form);
+            }
+            HookContext::GetCurrent().OriginalFunction<void>(self, info);
+        }
+
+        void    StartChangeHook(u8 *self, u8 *player)
+        {
+            int forced = ForcedForm();
+
+            if (forced >= 0 && player)
+            {
+                u8  wanted = player[kPlayerWantedForm];
+
+                // On Easy the Mega Mushroom is let through: when it runs out the game asks for
+                // the form from before, which is gold again.
+                if (wanted != forced && !(g_difficulty == DIFF_EASY && wanted == kFormMega))
+                {
+                    player[kPlayerWantedForm] = player[kPlayerForm];
+                    return;
+                }
+            }
+            HookContext::GetCurrent().OriginalFunction<void>(self, player);
+        }
+
+        u32     CollectHook(u8 *self, u32 how, u32 player)
+        {
+            // Hardcore: a power-up cannot be taken, Mario walks right through it
+            if (g_set.enabled && g_difficulty == DIFF_HARDCORE && DifficultyReady())
+                return 0;
+            return HookContext::GetCurrent().OriginalFunction<u32>(self, how, player);
+        }
+
+        bool    RainReady(void)
+        {
+            return g_throwFn && g_createItemFn && g_screenHolder;
+        }
+
+        u32     RainRandom(void)
+        {
+            g_rainSeed ^= g_rainSeed << 13;
+            g_rainSeed ^= g_rainSeed >> 17;
+            g_rainSeed ^= g_rainSeed << 5;
+            return g_rainSeed;
+        }
+
+        // The edges of what the screen shows, in level coordinates. false if the game has no
+        // screen object or what is in it makes no sense.
+        bool    ScreenEdges(float &left, float &right, float &top, float &bottom)
+        {
+            if (!g_screenHolder || !Process::CheckAddress(g_screenHolder, MEMPERM_READ))
+                return false;
+
+            u32 screen = *reinterpret_cast<u32 *>(g_screenHolder);
+
+            if (!screen || (screen & 3) || !Process::CheckAddress(screen + kScreenBottom, MEMPERM_READ))
+                return false;
+            left = *reinterpret_cast<float *>(screen + kScreenLeft);
+            right = *reinterpret_cast<float *>(screen + kScreenRight);
+            top = *reinterpret_cast<float *>(screen + kScreenTop);
+            bottom = *reinterpret_cast<float *>(screen + kScreenBottom);
+            // the top screen is 400 by 240, a level never shows much less or much more than that
+            return right - left > 100.0f && right - left < 2000.0f && top - bottom > 60.0f && top - bottom < 2000.0f
+                && left > -4096.0f && left < 70000.0f && top < 4096.0f && top > -70000.0f;
+        }
+
+        // A frame of a level with item rain has gone by, on the thread of the game. Is it time
+        // for the next item? The clock is the real one: after a long pause the game can have
+        // more items than kRainAlive for a moment, the look at the actor heap is there for that.
+        void    RainFrame(void)
+        {
+            u64 now = svcGetSystemTick();
+
+            g_rainFrameAt = now;
+            if (now - g_rainLast < g_rainGap)
+                return;
+
+            // the oldest of the last kRainAlive items has to be gone before another one comes
+            bool    full = g_rainTimes[g_rainNext]
+                        && now - g_rainTimes[g_rainNext] < static_cast<u64>(kRainLife) * SYSCLOCK_ARM11;
+            bool    low = false;
+
+            if (!full)
+            {
+                if (now - g_rainHeapAt > SYSCLOCK_ARM11 / 4)
+                {
+                    g_rainHeap = HeapFreeBytes(0, "ActorHeap");
+                    g_rainHeapAt = now;
+                }
+                // a game whose heaps the plugin cannot read has to make do with the count
+                low = g_rainHeap && g_rainHeap < kRainFloor;
+            }
+            if (full || low)
+            {
+                if (now - g_rainHeldAt > SYSCLOCK_ARM11)
+                {
+                    g_rainHeldAt = now;
+                    if (low)
+                        ++g_rainLow;
+                    else
+                        ++g_rainFull;
+                }
+                return;
+            }
+
+            float   left, right, top, bottom;
+
+            g_rainLast = now;
+            g_rainGap = static_cast<u64>(kRainGapMs + RainRandom() % kRainGapExtraMs) * (SYSCLOCK_ARM11 / 1000);
+            if (!ScreenEdges(left, right, top, bottom))
+            {
+                ++g_rainBlind;
+                return;
+            }
+
+            // which one: by weight, the Mega Mushroom only where it is loaded
+            u32 count = g_rainMega ? kRainItemCount : kRainItemCount - 1;
+            u32 total = 0;
+            u32 pick = 0;
+
+            for (u32 i = 0; i < count; ++i)
+                total += kRainItems[i].weight;
+
+            u32 roll = RainRandom() % total;
+
+            while (pick + 1 < count && roll >= kRainItems[pick].weight)
+                roll -= kRainItems[pick++].weight;
+
+            // somewhere along the top of the screen, just out of sight, the way the game drops
+            // its reserve item. The array is what the game reads, three floats.
+            alignas(4) float    pos[3];
+
+            pos[0] = left + 16.0f + static_cast<float>(RainRandom() % 1024) * (right - left - 32.0f) / 1024.0f;
+            pos[1] = top + 4.0f;
+            pos[2] = 0.0f;
+
+            typedef void    *(*CreateItemFn)(void *, const float *, u32, u32, u32);
+
+            reinterpret_cast<CreateItemFn>(g_createItemFn)(nullptr, pos, kItemModeDrop << 24, 0, kRainItems[pick].index);
+
+            g_rainTimes[g_rainNext] = now;
+            g_rainNext = (g_rainNext + 1) % kRainAlive;
+            ++g_rainThrown;
+            ++g_rainCounts[pick];
+
+            RainDrop    &drop = g_rainLog[g_rainLogHead % kRainLogSize];
+
+            drop.time = Uptime();
+            drop.number = g_rainThrown;
+            drop.x = static_cast<s32>(pos[0]);
+            drop.y = static_cast<s32>(pos[1]);
+            drop.left = static_cast<s32>(left);
+            drop.right = static_cast<s32>(right);
+            drop.top = static_cast<s32>(top);
+            drop.bottom = static_cast<s32>(bottom);
+            drop.freeKb = g_rainHeap / 1024;
+            drop.item = static_cast<u8>(pick);
+            g_rainLogHead = g_rainLogHead + 1;
+            // the figure can be a quarter of a second old, this item counts against it already
+            if (g_rainHeap > kRainItemBytes)
+                g_rainHeap -= kRainItemBytes;
+        }
+
+        // The spawners of the rain never throw, a frame of theirs is the plugin's turn. Any
+        // other spawner, the one of a Toad House, works as it always did.
+        void    ThrowHook(u8 *self)
+        {
+            HookContext &ctx = HookContext::GetCurrent();
+
+            if (g_rainOn && self
+                && ((*reinterpret_cast<u32 *>(self + kSpawnerSettings) >> 24) & 0xF) == Rando::RAIN_MARK)
+            {
+                RainFrame();
+                return;
+            }
+            ctx.OriginalFunction<void>(self);
+        }
+
+        // Level pixels to tiles, the way a level editor counts them: y grows downwards there
+        s32     TileOf(s32 pixels)
+        {
+            return pixels >= 0 ? pixels / 16 : -((-pixels + 15) / 16);
+        }
+
+        // Writes the items that came since the last call into the log, one line each
+        void    FlushRainLog(void)
+        {
+            u32         head = g_rainLogHead;
+            std::string text;
+            char        line[176];
+
+            if (head - g_rainLogTail > kRainLogSize)
+                g_rainLogTail = head - kRainLogSize;
+            for (; g_rainLogTail != head; ++g_rainLogTail)
+            {
+                const RainDrop  &drop = g_rainLog[g_rainLogTail % kRainLogSize];
+
+                std::snprintf(line, sizeof(line), " Rain (t %lus): item %lu, %s at tile %ld,%ld, screen shows tiles %ld..%ld across and %ld..%ld down, actors %lu KB free\n",
+                              drop.time, drop.number, kRainItems[drop.item < kRainItemCount ? drop.item : 0].name,
+                              TileOf(drop.x), TileOf(-drop.y), TileOf(drop.left), TileOf(drop.right),
+                              TileOf(-drop.top), TileOf(-drop.bottom), drop.freeKb);
+                text += line;
+            }
+            if (!text.empty())
+                AppendLog(text);
+        }
+
+        // What the rain of the level that just ended came to
+        std::string RainSummary(void)
+        {
+            std::string text = " Rain: " + std::to_string(g_rainThrown) + " items in this level";
+            char        line[160];
+            bool        first = true;
+
+            for (u32 i = 0; i < kRainItemCount; ++i)
+            {
+                if (!g_rainCounts[i])
+                    continue;
+                text += std::string(first ? ": " : ", ") + std::to_string(g_rainCounts[i]) + " " + kRainItems[i].name;
+                first = false;
+            }
+            std::snprintf(line, sizeof(line), "\n Rain: held back %lu s by the limit of %lu at a time and %lu s by low memory, the screen could not be read %lu times\n",
+                          g_rainFull, kRainAlive, g_rainLow, g_rainBlind);
+            return text + line;
+        }
+
+        // Twice a second while a level with rain runs: does the rain still get its frames? If
+        // not for a while, the game is paused or showing something, or no spawner is awake where
+        // the camera is. The log gets a line with the place, so a dry stretch can be found.
+        void    RainWatch(bool levelRunning)
+        {
+            if (!g_rainOn || !levelRunning || !g_rainFrameAt)
+                return;
+
+            bool    dry = svcGetSystemTick() - g_rainFrameAt > static_cast<u64>(kRainDrySeconds) * SYSCLOCK_ARM11;
+
+            if (dry && !g_rainDry)
+            {
+                float   left, right, top, bottom;
+                char    line[176];
+
+                if (ScreenEdges(left, right, top, bottom))
+                    std::snprintf(line, sizeof(line), " Rain (t %lus): no frame from a spawner for %lu s (pause, a cutscene, or none awake here), screen shows tiles %ld..%ld across and %ld..%ld down\n",
+                                  Uptime(), kRainDrySeconds, TileOf(static_cast<s32>(left)), TileOf(static_cast<s32>(right)),
+                                  TileOf(-static_cast<s32>(top)), TileOf(-static_cast<s32>(bottom)));
+                else
+                    std::snprintf(line, sizeof(line), " Rain (t %lus): no frame from a spawner for %lu s, and the screen cannot be read\n",
+                                  Uptime(), kRainDrySeconds);
+                AppendLog(line);
+            }
+            else if (!dry && g_rainDry)
+            {
+                char    line[64];
+
+                std::snprintf(line, sizeof(line), " Rain (t %lus): frames are coming again\n", Uptime());
+                AppendLog(line);
+            }
+            g_rainDry = dry;
+        }
+
         // What the plan for the level decided
         std::string PlanReport(void)
         {
@@ -901,13 +1409,17 @@ namespace CTRPluginFramework
             std::string         text;
             char                line[128];
 
-            if (!g_set.enabled || !g_set.enemies)
+            if (!g_set.enabled || (!g_set.enemies && !g_set.itemRain))
+                return text;
+            if (g_set.itemRain)
+                text = !plan.rain ? " Plan: no item rain, the level has no event number to spare\n"
+                     : plan.mega ? " Plan: item rain with Mega Mushrooms\n"
+                     : " Plan: item rain, no room to load the Mega Mushroom\n";
+            if (!g_set.enemies)
                 return text;
             if (!plan.known)
-                return " Plan: level not in the memory table, enemies only trade places with what it loads\n";
+                return text + " Plan: level not in the memory table, enemies only trade places with what it loads\n";
 
-            if (g_set.itemRain)
-                text = plan.rain ? " Plan: item rain is on\n" : " Plan: no room for the item rain in this level\n";
             text += " Plan: " + std::to_string(plan.freshCount) + " new kinds";
             for (u32 i = 0; i < plan.freshCount; ++i)
                 text += std::string(i ? ", " : ": ") + KindName(plan.fresh[i]);
@@ -935,6 +1447,12 @@ namespace CTRPluginFramework
             {
                 std::snprintf(line, sizeof(line), " Memory: %lu VRAM requests went to the other bank so far, %lu found no room at all\n",
                               g_vramMoved, g_vramFailed);
+                text += line;
+            }
+            if (g_rainOn)
+            {
+                std::snprintf(line, sizeof(line), " Rain: %lu items so far, held back %lu s by the limit of %lu at a time and %lu s by low memory\n",
+                              g_rainThrown, g_rainFull, kRainAlive, g_rainLow);
                 text += line;
             }
             g_loggedActors = HeapFreeBytes(0, "ActorHeap");
@@ -1009,7 +1527,7 @@ namespace CTRPluginFramework
             if (!gained.empty())
                 text += "   loads on top: " + gained + "\n";
             if (g_result[index].rain)
-                text += "   item rain: " + std::to_string(g_result[index].rain) + " spawners\n";
+                text += "   item rain: " + std::to_string(g_result[index].rain) + " spawners and controllers\n";
             return text;
         }
 
@@ -1077,6 +1595,21 @@ namespace CTRPluginFramework
                 if (actors && actors < g_lowActors)
                     g_lowActors = actors;
 
+                // what the rain did, and every life won or lost while a level runs
+                FlushRainLog();
+                RainWatch(g_levelRunning);
+
+                u32 *lives = g_levelRunning ? LivesCounter(1) : nullptr;
+
+                if (lives && g_livesSeen != 0xFFFFFFFF && *lives != g_livesSeen)
+                {
+                    char    line[64];
+
+                    std::snprintf(line, sizeof(line), " Lives (t %lus): %lu -> %lu\n", Uptime(), g_livesSeen, *lives);
+                    AppendLog(line);
+                }
+                g_livesSeen = lives ? *lives : 0xFFFFFFFF;
+
                 // Autosave: the level of this visit ran and has been gone for a while now, so Mario
                 // is back on the map. A life less than before means he died or gave up, and then
                 // nothing is saved.
@@ -1092,6 +1625,12 @@ namespace CTRPluginFramework
                     {
                         int lives = SavedLives();
 
+                        if (g_rainOn)
+                        {
+                            FlushRainLog();
+                            AppendLog(RainSummary());
+                            g_rainOn = false;
+                        }
                         g_inLevel = false;
                         g_levelRunning = false;
                         g_emptyReadings = 0;
@@ -1236,6 +1775,18 @@ namespace CTRPluginFramework
                 "After towers and castles the game asks about saving by itself, so those are left to it.");
 
             menu += g_eEnabled;
+            if (DifficultyReady())
+            {
+                g_eDifficulty = new MenuEntry("", nullptr, ChooseDifficulty,
+                    "Normal: the game as it is.\n"
+                    "Easy: Mario is Gold Mario all the time. A hit does not take it away, and other "
+                    "power-ups change nothing, apart from a Mega Mushroom while it lasts. He can still "
+                    "fall into a pit or run out of time.\n"
+                    "Hardcore: Mario stays small. Mushrooms, flowers and the leaf cannot be taken, he "
+                    "walks right through them. Stars and 1-Ups still work.\n\n"
+                    "The form changes with the next level, the rest applies right away.");
+                menu += g_eDifficulty;
+            }
             menu += g_eEnemies;
             menu += g_eLevels;
             menu += g_eCastles;
@@ -1244,6 +1795,15 @@ namespace CTRPluginFramework
             menu += g_eSeed;
             menu += g_eNoRepeats;
             menu += g_eAutosave;
+            if (RainReady())
+            {
+                g_eRain = Switch(g_set.itemRain,
+                    "Just for fun: items keep falling from the top of the screen. Mushrooms, Fire Flowers, "
+                    "Super Leaves, Gold Flowers, Mini Mushrooms, Stars and 1-Ups, and Mega Mushrooms wherever "
+                    "the level has memory to spare for them. Never more than 48 at a time, and none while the "
+                    "game is short on memory." + next);
+                menu += g_eRain;
+            }
             menu += new MenuEntry("Roll a random seed", nullptr, RollSeed);
             menu += new MenuEntry("Give up this level", nullptr, GiveUp,
                                   "Stuck? This runs the timer down, Mario loses a life and you return to the map.");
@@ -1256,6 +1816,49 @@ namespace CTRPluginFramework
                                   "Lists what was changed in the level loaded last.");
             menu += new MenuEntry("About", nullptr, ShowAbout, "Who made this and where bug reports go.");
             RefreshNames();
+        }
+
+        // Finds a function and gets its hook ready without putting it in place yet
+        u32     Prepare(Hook &hook, const u32 *pattern, u32 words, u32 hint, u32 callback)
+        {
+            u32 addr = FindCode(pattern, words, hint);
+
+            if (addr)
+                hook.InitializeForMitm(addr, callback);
+            return addr;
+        }
+
+        // The hooks of the difficulty are only in place while a mode other than Normal is chosen.
+        // On Normal the game runs the very code it ran before the plugin knew about difficulty.
+        void    ApplyDifficulty(void)
+        {
+            bool    wanted = DifficultyReady() && g_difficulty != DIFF_NORMAL;
+
+            if (wanted == g_difficultyHooked)
+                return;
+            if (wanted)
+            {
+                if (g_startChangeHook.Enable() != HookResult::Success
+                    || g_createPlayersHook.Enable() != HookResult::Success)
+                {
+                    // half a difficulty is worse than none
+                    g_startChangeHook.Disable();
+                    g_createPlayersHook.Disable();
+                    g_startChangeFn = 0;
+                    g_createPlayersFn = 0;
+                    return;
+                }
+                if (g_collectFn && g_collectHook.Enable() != HookResult::Success)
+                    g_collectFn = 0;
+            }
+            else
+            {
+                g_startChangeHook.Disable();
+                g_createPlayersHook.Disable();
+                if (g_collectFn)
+                    g_collectHook.Disable();
+            }
+            g_difficultyHooked = wanted;
         }
 
         u32     Install(Hook &hook, const u32 *pattern, u32 words, u32 hint, u32 callback)
@@ -1290,6 +1893,28 @@ namespace CTRPluginFramework
         if (g_vramFreeFn)
             g_vramAllocFn = Install(g_vramAllocHook, kVramAllocPattern, sizeof(kVramAllocPattern) / 4, kVramAllocEur,
                                     reinterpret_cast<u32>(VramAllocHook));
+        // Difficulty: both or none of the first two, taking power-ups away from Hardcore is extra.
+        // The hooks are only got ready here, ApplyDifficulty puts them in place once a mode
+        // other than Normal is chosen.
+        g_startChangeFn = Prepare(g_startChangeHook, kStartChangePattern, sizeof(kStartChangePattern) / 4,
+                                  kStartChangeEur, reinterpret_cast<u32>(StartChangeHook));
+        if (g_startChangeFn)
+            g_createPlayersFn = Prepare(g_createPlayersHook, kCreatePlayersPattern, sizeof(kCreatePlayersPattern) / 4,
+                                        kCreatePlayersEur, reinterpret_cast<u32>(CreatePlayersHook));
+        if (g_createPlayersFn)
+            g_collectFn = Prepare(g_collectHook, kCollectPattern, sizeof(kCollectPattern) / 4, kCollectEur,
+                                  reinterpret_cast<u32>(CollectHook));
+
+        // the item rain: where items are made, where the screen is, and the hook that gives it its turn
+        g_createItemFn = FindCode(kCreateItemPattern, sizeof(kCreateItemPattern) / 4, kCreateItemEur);
+
+        u32 drop = FindCode(kReserveDropPattern, sizeof(kReserveDropPattern) / 4, kReserveDropEur);
+
+        if (drop)
+            g_screenHolder = *reinterpret_cast<u32 *>(drop + kReserveDropLiteral);
+        if (g_createItemFn && g_screenHolder)
+            g_throwFn = Install(g_throwHook, kThrowPattern, sizeof(kThrowPattern) / 4, kThrowEur,
+                                reinterpret_cast<u32>(ThrowHook));
     }
 
     void    OnProcessExit(void)
@@ -1300,11 +1925,15 @@ namespace CTRPluginFramework
         g_timeHook.Disable();
         g_vramAllocHook.Disable();
         g_vramFreeHook.Disable();
+        g_throwHook.Disable();
+        g_startChangeHook.Disable();
+        g_createPlayersHook.Disable();
+        g_collectHook.Disable();
     }
 
     int     main(void)
     {
-        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 5, 1,
+        PluginMenu  *menu = new PluginMenu("NSMB2 Randomizer", 0, 6, 0,
             "Randomizes enemies and levels of New Super Mario Bros. 2 based on a seed.\n"
             "Every setting applies from the next level on.\n\n"
             "Made by L61r on Discord. Found a bug? Send me a message there.");
@@ -1312,7 +1941,19 @@ namespace CTRPluginFramework
         g_startTick = svcGetSystemTick();
         menu->SynchronizeWithFrame(true);
         LoadConfig();
-        AppendLog("Plugin 0.5.1 started\n");
+        ApplyDifficulty();
+        AppendLog("Plugin 0.6.0 started\n");
+        {
+            char    line[112];
+
+            std::snprintf(line, sizeof(line), " Rain: %s, items are made at %08lX, the screen is read through %08lX, hook at %08lX\n",
+                          RainReady() ? "ready" : "not available in this game", g_createItemFn, g_screenHolder, g_throwFn);
+            AppendLog(line);
+            std::snprintf(line, sizeof(line), " Difficulty: %s, set to %u, hooks at %08lX %08lX %08lX\n",
+                          DifficultyReady() ? "ready" : "not available in this game", g_difficulty,
+                          g_createPlayersFn, g_startChangeFn, g_collectFn);
+            AppendLog(line);
+        }
         Test::Init(g_set);
         Test::SetGiveUp(RunDownTimer);
         Test::SetLives(SetLives999);
@@ -1321,8 +1962,10 @@ namespace CTRPluginFramework
         {
             char    line[64];
 
-            std::snprintf(line, sizeof(line), "hooks %08lX %08lX %08lX %08lX %08lX %08lX", g_loader, g_nameFn,
-                          g_lookupFn, g_timeFn, g_vramAllocFn, g_vramFreeFn);
+            std::snprintf(line, sizeof(line), "hooks %08lX %08lX %08lX %08lX %08lX %08lX %08lX", g_loader, g_nameFn,
+                          g_lookupFn, g_timeFn, g_vramAllocFn, g_vramFreeFn, g_throwFn);
+            Test::Note(line);
+            std::snprintf(line, sizeof(line), "rain %08lX %08lX", g_createItemFn, g_screenHolder);
             Test::Note(line);
         }
         InitMenu(*menu);

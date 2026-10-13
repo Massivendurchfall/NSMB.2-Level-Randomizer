@@ -161,7 +161,6 @@ namespace Test
             else if (key == "autosave") s.autosave = static_cast<uint8_t>(value);
             else if (key == "norepeat") s.noRepeats = static_cast<uint8_t>(value);
             else if (key == "rain") s.itemRain = static_cast<uint8_t>(value);
-            else if (key == "rainprobe") Rando::SetRainProbe(value);
         }
 
         // lines of the form name=number

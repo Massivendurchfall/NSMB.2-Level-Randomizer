@@ -14,6 +14,7 @@ static uint32_t R32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16)
 static uint16_t R16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 
 static int g_errors = 0;
+static uint32_t rainSpawnerCount = 0, rainMegaLevels = 0;
 
 static bool OneOf(uint16_t id, const uint16_t *list, size_t n)
 {
@@ -68,6 +69,52 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
         Fail(index, "sprite list with item rain has the wrong size");
     uint32_t count = 0, changed = 0, flags = 0;
 
+    // Where the sprites are in the new list. The game hands it out in runs, one per zone number:
+    // it counts the sprites that carry each number and gives zone 0 the first so many, zone 1 the
+    // next ones, and so on. Every run has to hold what it held before, in the old order, and
+    // after that the sprites the item rain added for that very zone.
+    uint32_t total = 0;
+
+    while ((total + 1) * 24 <= sSize && R16(&in[sOff + total * 24]) != 0xFFFF)
+        ++total;
+
+    std::vector<uint32_t> origAt(total), rainAt;
+    uint32_t oldRun[64] = { 0 }, newRun[64] = { 0 };
+
+    for (uint32_t i = 0; i < total; ++i)
+        if (in[sOff + i * 24 + 16] < 64)
+            ++oldRun[in[sOff + i * 24 + 16]];
+    for (uint32_t i = 0; i < total + res.rain && (i + 1) * 24 <= nSize; ++i)
+        if (out[nOff + i * 24 + 16] < 64)
+            ++newRun[out[nOff + i * 24 + 16]];
+    {
+        uint32_t pos = 0, src = 0;
+
+        for (uint32_t z = 0; z < 64; ++z)
+        {
+            if (newRun[z] < oldRun[z])
+            {
+                Fail(index, "a zone has fewer sprites than before");
+                return;
+            }
+            for (uint32_t k = 0; k < oldRun[z]; ++k)
+                origAt[src++] = pos++;
+            for (uint32_t k = oldRun[z]; k < newRun[z]; ++k)
+            {
+                if (out[nOff + pos * 24 + 16] != z)
+                    Fail(index, "a sprite of the item rain sits in the run of another zone");
+                rainAt.push_back(pos++);
+            }
+        }
+        while (src < total)
+            origAt[src++] = pos++;
+        if (rainAt.size() != res.rain || pos != total + res.rain)
+        {
+            Fail(index, "the sprites of the item rain do not add up");
+            return;
+        }
+    }
+
     if (uOff + uSize != res.outSize)
         Fail(index, "load list is not at the end");
     // nothing the area loaded before may be missing afterwards
@@ -89,7 +136,7 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
     while ((count + 1) * 24 <= sSize && R16(&in[sOff + count * 24]) != 0xFFFF)
     {
         const uint8_t *a = &in[sOff + count * 24];
-        const uint8_t *b = out + nOff + count * 24;
+        const uint8_t *b = out + nOff + origAt[count] * 24;
         uint16_t id = R16(b);
         bool listed = false;
 
@@ -126,23 +173,54 @@ static void Check(size_t index, const std::vector<uint8_t> &in, const uint8_t *o
             Fail(index, "kind is missing from the load list");
         ++count;
     }
-    // the spawners of the item rain follow the sprites of the level
+    // the spawners and controllers of the item rain
     for (uint32_t i = 0; i < res.rain; ++i)
     {
-        const uint8_t *spr = out + nOff + (count + i) * 24;
+        const uint8_t *spr = out + nOff + rainAt[i] * 24;
         bool listed = false, known = false;
         static const uint8_t items[] = { 1, 2, 4, 5, 6, 7, 9, 11 };
+        bool megaLoaded = false;
 
-        if (R16(spr) != 252)
-            Fail(index, "item rain added something that is no item spawner");
+        for (uint32_t k = 0; k < uSize; k += 4)
+            megaLoaded = megaLoaded || R16(out + uOff + k) == 288;
+
+        uint16_t rid = R16(spr);
+
+        if (rid != 252 && rid != 86)
+            Fail(index, "item rain added something that is neither spawner nor controller");
+        // both wait for or switch on one event, and that one must be a number of its own
+        if (spr[6] < 32 || spr[6] > 63)
+            Fail(index, "item rain uses an odd event number");
+        for (uint32_t n = 0; n < count; ++n)
+            if (in[sOff + n * 24 + 6] == spr[6] || in[sOff + n * 24 + 7] == spr[6])
+                Fail(index, "item rain uses an event the level uses itself");
         for (uint8_t item : items)
             known = known || (spr[11] >> 4) == item;
-        if (!known || (spr[10] >> 4) != 1 || (spr[9] & 0x0F) == 0)
+        if (rid == 252 && (!known || (spr[10] >> 4) != 1 || (spr[9] & 0x0F) == 0))
             Fail(index, "item spawner has odd settings");
+        // the mark that tells the plugin this spawner is one of the rain
+        if (rid == 252 && (spr[11] & 0x0F) != Rando::RAIN_MARK)
+            Fail(index, "an item spawner of the rain is not marked");
+        (void)megaLoaded;
         for (uint32_t k = 0; k < uSize; k += 4)
-            listed = listed || R16(out + uOff + k) == 252;
+            listed = listed || R16(out + uOff + k) == rid;
         if (!listed)
-            Fail(index, "item spawner is missing from the load list");
+            Fail(index, "item rain is missing from the load list");
+        // a spawner only starts if a controller of its own zone switches its event on
+        if (rid == 252)
+        {
+            bool switched = false;
+
+            for (uint32_t n = 0; n < res.rain; ++n)
+            {
+                const uint8_t *other = out + nOff + rainAt[n] * 24;
+
+                switched = switched || (R16(other) == 86 && other[6] == spr[6] && other[16] == spr[16]);
+            }
+            if (!switched)
+                Fail(index, "an item spawner has no controller in its zone");
+            ++rainSpawnerCount;
+        }
     }
     if (R16(out + nOff + (count + res.rain) * 24) != 0xFFFF && (count + res.rain + 1) * 24 <= nSize)
         Fail(index, "sprite terminator is missing");
@@ -182,6 +260,7 @@ static void TestLevels()
 
         Rando::DefaultSettings(s);
         s.seed = seed;
+        s.noRepeats = 1;    // off by default, and part of what is tested here
         Rando::SetProgress(nullptr);
 
         // fixed seed
@@ -399,6 +478,7 @@ int main(int argc, char **argv)
                         Rando::PlanLevel(ptrs, sizes, s, levelSeed, pooled != 0);
 
                         Rando::Plan plan = Rando::LastPlan();
+                        bool rained[Rando::MAX_AREAS] = { false, false, false, false };
 
                         ++planned;
                         known += plan.known;
@@ -428,6 +508,7 @@ int main(int argc, char **argv)
                                 maxGrow = res.typesAfter - res.typesBefore;
                             if (res.outSize > maxSize) maxSize = res.outSize;
                             rainSpawners += res.rain;
+                            rained[a] = res.rain != 0;
                             if (res.rain && !plan.rain)
                                 Fail(i, "item rain in a level whose plan has none");
                             if (res.rain)
@@ -436,6 +517,23 @@ int main(int argc, char **argv)
                                 targets[res.mapTo[m]] += res.mapHits[m];
                             for (uint16_t id : LoadList(out[a]))
                                 after.insert(id);
+                        }
+
+                        // The plugin makes Mega Mushrooms wherever the plan says so, and an area with
+                        // spawners is where it does. Each of those has to load the mushroom.
+                        if (plan.rain && plan.mega)
+                        {
+                            ++rainMegaLevels;
+                            for (size_t i : levels[l])
+                            {
+                                const Course &c = courses[i];
+                                bool spawner = false;
+
+                                for (uint16_t id : LoadList(out[c.area - 1]))
+                                    spawner = spawner || id == 252;
+                                if (rained[c.area - 1] && spawner && !LoadList(out[c.area - 1]).count(288))
+                                    Fail(i, "an area with item rain does not load the Mega Mushroom the plan promises");
+                            }
                         }
 
                         // What the level loads on top of before has to be what the plan announced, and
@@ -447,9 +545,12 @@ int main(int argc, char **argv)
                         {
                             if (before.count(id))
                                 continue;
+                            // spawner and controller of the item rain have no models, they load nothing
+                            if ((id == 86 || id == 252) && plan.rain)
+                                continue;
                             ++added;
 
-                            bool announced = id == 252 && plan.rain;
+                            bool announced = id == 288 && plan.mega;
 
                             for (uint32_t k = 0; k < plan.freshCount; ++k)
                                 announced = announced || plan.fresh[k] == id;
@@ -467,7 +568,8 @@ int main(int argc, char **argv)
                         if (added)
                         {
                             const Rando::LevelRoom *room = RoomOf(plan.key);
-                            static const uint32_t reserve[Rando::MEM_COUNT] = { 640, 256, 4, 128, 64, 64 };
+                            // when it rains the items in the air need actor memory as well
+                            const uint32_t reserve[Rando::MEM_COUNT] = { plan.rain ? 1120u : 640u, 256, 4, 128, 64, 64 };
 
                             ++freshLevels;
                             freshKinds += added;
@@ -475,8 +577,9 @@ int main(int argc, char **argv)
                                 Fail(levels[l][0], "new kinds in a level that was never measured");
                             else
                             {
+                                // a pool nothing was taken from may be below its reserve to begin with
                                 for (uint32_t r = 0; r < Rando::MEM_VRAM_A; ++r)
-                                    if (spent[r] + reserve[r] > room->free[r])
+                                    if (spent[r] && spent[r] + reserve[r] > room->free[r])
                                         Fail(levels[l][0], "the plan eats into the reserve of a memory pool");
                                 if (pooled)
                                 {
@@ -518,6 +621,9 @@ int main(int argc, char **argv)
     }
 
     TestLevels();
+    std::printf("item rain: %u spawners over all passes, %u level plans with the Mega Mushroom\n", rainSpawnerCount, rainMegaLevels);
+    if (!rainSpawnerCount || !rainMegaLevels)
+        Fail(0, "the item rain never came, or never with a Mega Mushroom");
     std::printf("%d errors\n", g_errors);
     return g_errors ? 1 : 0;
 }

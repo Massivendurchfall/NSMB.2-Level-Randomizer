@@ -19,6 +19,7 @@ core = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'plug
             encoding='utf-8').read()
 kind_names = {int(i): n for i, n in re.findall(r'\{\s*(\d+), SLOT_\w+,.*?"([^"]+)" \}', core)}
 kind_names[252] = 'Item spawner, for the item rain'
+kind_names[288] = 'Mega Mario loader, for the Mega Mushroom of the item rain'
 
 baseline = {}       # base level -> values
 with_kind = {}      # (base level, kind) -> values

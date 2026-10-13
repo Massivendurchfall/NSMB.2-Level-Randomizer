@@ -74,12 +74,18 @@ namespace Rando
 
     enum { MAX_AREAS = 4, MAX_FRESH = 16 };
 
+    // The item spawners the item rain puts into a level carry this in the low half of the last
+    // byte of their settings (byte 11 of the sprite), a place the game does not look at. It
+    // tells them from the spawner of a Toad House.
+    enum { RAIN_MARK = 0xA };
+
     // What the plan for a level settled on, kept for the log
     struct Plan
     {
         uint32_t key;                   // CRC of the first area's course file, identifies the level
         uint8_t  known;                 // the level is in the memory table
-        uint8_t  rain;                  // the item rain fits into the memory of this level
+        uint8_t  rain;                  // items rain in this level
+        uint8_t  mega;                  // and the Mega Mushroom is among them
         uint8_t  freshCount;
         uint16_t fresh[MAX_FRESH];      // kinds the level did not load before
         uint16_t freeBefore[MEM_COUNT]; // KB the untouched level leaves free
@@ -136,8 +142,6 @@ namespace Rando
 
     // Testing only: the first swappable enemy of a level turns into this ID, 0 switches it off
     void        SetForcedTarget(uint16_t id);
-    // Testing: item spawners right at the start of a level, with these settings (bytes 10, 9, 8)
-    void        SetRainProbe(uint32_t settings);
     // Testing: puts one more kind on the load list of the first area of a level, 0 clears them all
     void        AddExtraKind(uint16_t id);
 
