@@ -25,6 +25,16 @@ namespace Test
         bool        g_pilot = false;
         bool        g_walk = false;
         bool        g_swapAreas = false;
+        u32         g_startAt = 0;
+        u32         g_areaMask = 0;
+        u32         g_startArea = 0;
+        u32         g_startEntrance = 0;
+        u32         g_destArea = 0;
+        u32         g_dest = 0;
+        bool        g_haveDest = false;
+        u32         g_levelSeed = 0;
+        bool        g_haveLevelSeed = false;
+        bool        g_dropSecret = false;
         u32         g_touchX = 0;
         u32         g_touchY = 0;
         u32         g_cmdKeys = 0;
@@ -40,6 +50,8 @@ namespace Test
         bool        g_haveShot = false;
         u8          g_shot[kWidth * kHeight * 3];
         bool        (*g_giveUp)(void) = nullptr;
+        bool        (*g_lives)(void) = nullptr;
+        bool        (*g_save)(void) = nullptr;
 
         // slowest pass of the plugin loop since the last heartbeat, in milliseconds of console time
         u64         g_lastTick = 0;
@@ -115,19 +127,25 @@ namespace Test
             Rando::Settings &s = *g_settings;
 
             if (key == "force") Rando::SetForcedTarget(static_cast<uint16_t>(value));
-            else if (key == "itemobj") Rando::SetForcedItem(static_cast<uint16_t>(value));
+            else if (key == "addkind") Rando::AddExtraKind(static_cast<uint16_t>(value));
             else if (key == "mode") s.mode = static_cast<uint8_t>(value);
             else if (key == "perinst") s.perInstance = static_cast<uint8_t>(value);
-            else if (key == "variety") s.variety = static_cast<uint8_t>(value);
+            else if (key == "castles") s.castles = static_cast<uint8_t>(value);
             else if (key == "seed") s.seed = value;
             else if (key == "enabled") s.enabled = static_cast<uint8_t>(value);
             else if (key == "enemies") s.enemies = static_cast<uint8_t>(value);
             else if (key == "levels") s.levels = static_cast<uint8_t>(value);
-            else if (key == "items") s.items = static_cast<uint8_t>(value);
-            else if (key == "extra") s.itemsExtra = static_cast<uint8_t>(value);
             else if (key == "reroll") s.rerollEachTry = static_cast<uint8_t>(value);
             else if (key == "level") g_forcedLevel = value;
             else if (key == "swap") g_swapAreas = value != 0;
+            else if (key == "startat") g_startAt = value;
+            else if (key == "areas") g_areaMask = value;
+            else if (key == "area") g_startArea = value;
+            else if (key == "entr") g_startEntrance = value;
+            else if (key == "destarea") g_destArea = value;
+            else if (key == "dest") { g_dest = value; g_haveDest = true; }
+            else if (key == "lseed") { g_levelSeed = value; g_haveLevelSeed = true; }
+            else if (key == "dropsecret") g_dropSecret = value != 0;
             else if (key == "pilot") g_pilot = value != 0;
             else if (key == "walk") g_walk = value != 0;
             else if (key == "touchx") g_touchX = value;
@@ -138,6 +156,12 @@ namespace Test
             else if (key == "ty") g_cmdTouchY = value;
             else if (key == "shot") g_wantShot = true;
             else if (key == "giveup") Log(g_giveUp && g_giveUp() ? "Timer run down\n" : "No timer yet\n");
+            else if (key == "lives") Log(g_lives && g_lives() ? "Lives set to 999\n" : "Lives not found\n");
+            else if (key == "save") Log(g_save && g_save() ? "Save requested\n" : "Save refused\n");
+            else if (key == "autosave") s.autosave = static_cast<uint8_t>(value);
+            else if (key == "norepeat") s.noRepeats = static_cast<uint8_t>(value);
+            else if (key == "rain") s.itemRain = static_cast<uint8_t>(value);
+            else if (key == "rainprobe") Rando::SetRainProbe(value);
         }
 
         // lines of the form name=number
@@ -217,6 +241,73 @@ namespace Test
     bool    SwapAreas(void)
     {
         return g_active && g_swapAreas;
+    }
+
+    bool    LevelSeed(u32 &seed)
+    {
+        if (!g_active || !g_haveLevelSeed)
+            return false;
+        seed = g_levelSeed;
+        return true;
+    }
+
+    bool    AreaEnemies(u32 index)
+    {
+        return !g_active || !g_areaMask || ((g_areaMask >> index) & 1);
+    }
+
+    bool    StartArea(u32 &area, u32 &entrance)
+    {
+        if (!g_active || !g_startArea)
+            return false;
+        area = g_startArea - 1;
+        entrance = g_startEntrance;
+        return true;
+    }
+
+    bool    DropSecret(void)
+    {
+        return g_active && g_dropSecret;
+    }
+
+    void    MoveStart(u8 *course)
+    {
+        if (!g_active || !g_startAt || !course)
+            return;
+
+        const u32   *head = reinterpret_cast<const u32 *>(course);
+        u8          start = course[head[2] + 0x10];
+        u8          *entrances = course + head[12];
+        u32         count = head[13] / 24;
+        u8          *from = nullptr, *to = nullptr;
+
+        for (u32 i = 0; i < count; ++i)
+        {
+            u8  *e = entrances + i * 24;
+
+            if (e[8] == start)
+                to = e;
+            if (e[8] == g_startAt)
+                from = e;
+        }
+        if (from && to)
+            std::memcpy(to, from, 4);
+        // and that door may lead somewhere else: destination area and entrance
+        if (from && g_haveDest)
+        {
+            from[9] = static_cast<u8>(g_destArea);
+            from[10] = static_cast<u8>(g_dest);
+        }
+    }
+
+    void    SetSave(bool (*action)(void))
+    {
+        g_save = action;
+    }
+
+    void    SetLives(bool (*action)(void))
+    {
+        g_lives = action;
     }
 
     void    SetGiveUp(bool (*action)(void))

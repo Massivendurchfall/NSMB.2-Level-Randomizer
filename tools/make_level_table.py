@@ -1,7 +1,8 @@
 """Generates plugin/Includes/LevelTable.hpp from the course files of the game.
 
 Levels are only shuffled within their class so the world map keeps working: a level with a
-secret exit has to land on a node that has a secret path, towers and castles stay where they are.
+secret exit has to land on a node that has a secret path, castles only trade places with each
+other and so do towers, the two castles of Bowser stay where they are.
 
 Usage: python make_level_table.py <romfs/Course> <LevelTable.hpp>
 """
@@ -11,16 +12,22 @@ from collections import defaultdict
 import nsmb2
 
 GOAL = 97
+CASTLE_DOOR = 70     # the door to a Koopaling, Bowser has a door of his own
+TOWER_DOOR = 75      # the door to the Reznors
 CHECKPOINT = 52
 # anything that makes a level special: bosses, boss controller, toad house, warp cannon, credits
 SPECIAL = {38, 102, 141, 142, 155, 162, 211, 245, 125, 128, 129, 130, 30, 126, 258, 103, 294, 315, 319}
 
 
 def main():
-    info = defaultdict(lambda: {'goal': False, 'secret': False, 'special': False})
+    info = defaultdict(lambda: {'goal': False, 'secret': False, 'special': False, 'castle': False, 'tower': False})
     for level, _name, course in nsmb2.iter_courses(sys.argv[1]):
         entry = info[level]
         for s in nsmb2.course_sprites(course):
+            if s['id'] == CASTLE_DOOR:
+                entry['castle'] = True
+            if s['id'] == TOWER_DOOR:
+                entry['tower'] = True
             if s['id'] == GOAL:
                 entry['goal'] = True
                 # nybble 4 of the goal pole marks the red flag of a secret exit
@@ -29,8 +36,15 @@ def main():
             elif s['id'] in SPECIAL:
                 entry['special'] = True
 
-    classes = {'Normal': [], 'Secret': []}
+    classes = {'Normal': [], 'Secret': [], 'Castle': [], 'Tower': [], 'TowerSecret': []}
     for level, entry in info.items():
+        # the towers proper are the files W-14, the door also shows up in two other levels
+        tower = entry['tower'] and level.endswith('-14')
+        if entry['castle'] or tower:
+            # three of the towers have a secret exit, the cannons of worlds 1 and 3 hang on two of them
+            kind = 'Castle' if entry['castle'] else ('TowerSecret' if entry['secret'] else 'Tower')
+            classes[kind].append(tuple(int(x) for x in level.split('-')))
+            continue
         if not entry['goal'] or entry['special']:
             continue
         world, number = (int(x) for x in level.split('-'))

@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "LevelTable.hpp"
+#include "MemoryTable.hpp"
 
 namespace Rando
 {
@@ -15,18 +16,36 @@ namespace Rando
         const uint32_t  kHeaderSize = kBlockCount * 8;
         const uint32_t  kBlockSprites = 7;
         const uint32_t  kBlockUsed = 8;
+        const uint32_t  kBlockZones = 9;
+        const uint32_t  kZoneSize = 28;     // x, y, width, height as u16 in pixels, the zone's ID at +12
         const uint32_t  kSpriteSize = 24;
         const uint32_t  kMaxTypes = 128;
         const uint32_t  kMaxPool = 64;
         const uint16_t  kCheckpointFlag = 52;
         const uint16_t  kGoldRing = 206;
-        // The game hangs once an area lists too many different sprites: 44 did it, 39 ran fine,
-        // the busiest original area has 36. Swaps stay below this total and never add more than
-        // a handful of kinds to one area.
-        const uint32_t  kSafeKindTotal = 38;
-        const uint32_t  kMinExtraKinds = 2;
-        const uint32_t  kMaxExtraKinds = 6;
-        const uint32_t  kTileObjectSize = 16;
+        // Item rain, not offered in the menu yet: placed like this the spawners throw nothing,
+        // how they are triggered still has to be found out.
+        // Sprite 252 is the item spawner the Toad Houses use: it throws a number of
+        // items of one sort, one after the other. Its settings: nybble 4 the item, 6 how it comes
+        // out (1 = thrown), 7 a random extra delay, 8 the delay, 9 how many, 10 the speed,
+        // 11 the direction. A row of them sits along the top of every zone, another row every
+        // few screens further down, so wherever the camera is something comes down.
+        const uint16_t  kItemSpawner = 252;
+        const uint32_t  kMaxRain = 40;                  // spawners per area
+        const uint32_t  kRainStep = 11 * 16;            // distance between two spawners of a row
+        const uint32_t  kRainRows = 13 * 16;            // distance between two rows
+        // Super Mushroom, Fire Flower, Super Leaf, Gold Flower, Mini Mushroom, Star, Mega Mushroom, 1-Up
+        const uint8_t   kRainItems[] = { 1, 2, 4, 5, 6, 7, 9, 11 };
+        const uint32_t  kMaxLoaded = 256;
+        // New kinds a level gets at most, however much memory it has to spare
+        const uint32_t  kMaxFreshKinds = 16;
+        // What stays untouched in each memory pool, in KB. The table says what a level leaves free
+        // right after loading. Enemies and effects that show up while it is played need room as
+        // well, and an enemy that was swapped in can be bigger than the one it replaced.
+        const uint16_t  kReserve[MEM_COUNT] = { 640, 256, 4, 128, 64, 64 };
+        // An enemy the area was not built with is the point of the exercise, so it comes up
+        // more often than its weight alone would have it
+        const uint32_t  kUnusualBoost = 8;
 
         enum Slot
         {
@@ -65,28 +84,29 @@ namespace Rando
         const Kind  kKinds[] =
         {
             // Who may stand where follows what makes sense in the level: walkers on the ground,
-            // flyers above it, swimmers in the water. A fish on land or a Goomba dropping out of
-            // the sky is no fun, and neither is a walker at the bottom of the sea.
+            // flyers above it, swimmers in the water. A fish on land is no fun, and neither is
+            // a walker at the bottom of the sea. In Chaos everything on land trades with
+            // everything, so a walker may also take the place of a flyer and drop from there.
             // Ground enemies
-            { 135, SLOT_GROUND, { S, N, N },  16,   8, 4, 0, "Goomba" },
-            { 136, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Bone Goomba" },
-            { 137, SLOT_GROUND, { W, N, N },  16,  12, 1, 0, "Micro Goomba" },
-            { 139, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Goomba Tower" },
-            { 165, SLOT_GROUND, { S, N, N },  16,   4, 4, 0, "Koopa Troopa" },
-            { 158, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Buzzy Beetle" },
-            { 232, SLOT_GROUND, { S, N, N },  16,   8, 3, 0, "Spiny" },
-            { 110, SLOT_GROUND, { S, N, N },  16,   4, 3, 0, "Dry Bones" },
-            { 111, SLOT_GROUND, { S, N, N },  48,  24, 1, 0, "Big Dry Bones" },
-            {  29, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Bob-omb" },
-            {  33, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Hammer Bro" },
-            {  31, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Boomerang Bro" },
-            {  32, SLOT_GROUND, { S, N, N },  32,  16, 2, 0, "Fire Bro" },
-            {  34, SLOT_GROUND, { S, N, N },  48,  24, 1, 0, "Sledge Bro" },
-            { 213, SLOT_GROUND, { S, N, N },  16,   0, 2, 0, "Pokey" },
-            {  99, SLOT_GROUND, { S, N, N },  16,   4, 2, 0, "Wiggler" },
-            { 138, SLOT_GROUND, { S, N, N },  16,   4, 3, 0, "Paragoomba" },
-            {  82, SLOT_GROUND, { S, N, N },  16,   8, 2, 0, "Fire Snake" },
-            { 159, SLOT_GROUND, { W, N, N },  16,   8, 2, 0, "Spike Top" },
+            { 135, SLOT_GROUND, { S, C, N },  16,   8, 4, 0, "Goomba" },
+            { 136, SLOT_GROUND, { S, C, N },  16,   8, 3, 0, "Bone Goomba" },
+            { 137, SLOT_GROUND, { W, C, N },  16,  12, 1, 0, "Micro Goomba" },
+            { 139, SLOT_GROUND, { S, C, N },  16,   8, 2, 0, "Goomba Tower" },
+            { 165, SLOT_GROUND, { S, C, N },  16,   4, 4, 0, "Koopa Troopa" },
+            { 158, SLOT_GROUND, { S, C, N },  16,   8, 3, 0, "Buzzy Beetle" },
+            { 232, SLOT_GROUND, { S, C, N },  16,   8, 3, 0, "Spiny" },
+            { 110, SLOT_GROUND, { S, C, N },  16,   4, 3, 0, "Dry Bones" },
+            { 111, SLOT_GROUND, { S, C, N },  48,  24, 1, 0, "Big Dry Bones" },
+            {  29, SLOT_GROUND, { S, C, N },  16,   8, 2, 0, "Bob-omb" },
+            {  33, SLOT_GROUND, { S, C, N },  32,  16, 2, 0, "Hammer Bro" },
+            {  31, SLOT_GROUND, { S, C, N },  32,  16, 2, 0, "Boomerang Bro" },
+            {  32, SLOT_GROUND, { S, C, N },  32,  16, 2, 0, "Fire Bro" },
+            {  34, SLOT_GROUND, { S, C, N },  48,  24, 1, 0, "Sledge Bro" },
+            { 213, SLOT_GROUND, { S, C, N },  16,   0, 2, 0, "Pokey" },
+            {  99, SLOT_GROUND, { S, C, N },  16,   4, 2, 0, "Wiggler" },
+            { 138, SLOT_GROUND, { S, C, N },  16,   4, 3, 0, "Paragoomba" },
+            {  82, SLOT_GROUND, { S, C, N },  16,   8, 2, 0, "Fire Snake" },
+            { 159, SLOT_GROUND, { W, C, N },  16,   8, 2, 0, "Spike Top" },
             { 175, SLOT_GROUND, { S, N, N },  32,  24, 2, 1, "Piranha Plant" },
             { 176, SLOT_GROUND, { W, N, N },  64,  40, 1, 1, "Big Piranha Plant" },
             { 177, SLOT_GROUND, { S, N, N },  32,  16, 2, 1, "Fire Piranha Plant" },
@@ -143,28 +163,10 @@ namespace Rando
         };
         const uint32_t  kPlantCount = sizeof(kPlants) / sizeof(kPlants[0]);
 
-        // The pipe enemy generator (68) spawns these, so their models stay loaded
-        const uint16_t  kGeneratorSpawns[] = { 135, 29, 136 };
-
-        // Item blocks of the standard tileset (J_Kihon), by object number. Within one row
-        // every entry is the same block with a different power-up inside. Coins, beanstalks,
-        // trampolines and the Mega Mushroom are not listed and therefore never touched.
-        // Blocks that hold a Mini Mushroom are left alone as well, it only shows up as a result.
-        struct ItemRow
-        {
-            uint16_t    fire, leaf, star, oneUp, mini, gold;
-        };
-
-        const ItemRow   kItemRows[] =
-        {
-            {  6, 11,  7,  8, 10, 12 },     // invisible block
-            { 20, 21, 24, 26, 23, 22 },     // brick block
-            { 32, 33, 37, 38, 35, 34 },     // question block
-        };
-        const uint16_t  kBrickStarAlt = 25; // second brick block variant holding a star
-
         uint16_t    g_forced = 0;
-        uint16_t    g_forcedItem = 0;
+        uint32_t    g_rainProbe = 0;
+        uint16_t    g_extraKinds[8];
+        uint32_t    g_extraKindCount = 0;
 
         inline uint16_t Read16(const uint8_t *p)
         {
@@ -316,36 +318,91 @@ namespace Rando
             return src.feet - dst.feet;
         }
 
-        // Every kind that may fill this slot in the current mode
-        uint32_t    BuildPool(uint32_t slot, const Settings &s, uint16_t exclude, const Kind **pool)
+        bool    HasId(const uint16_t *list, uint32_t count, uint16_t id)
         {
-            uint32_t    n = 0;
-
-            if (slot > SLOT_WATER)
-                return 0;
-            for (uint32_t i = 0; i < kKindCount && n < kMaxPool; ++i)
-                if (kKinds[i].id != exclude && kKinds[i].fill[slot] <= s.mode)
-                    pool[n++] = &kKinds[i];
-            return n;
+            for (uint32_t i = 0; i < count; ++i)
+                if (list[i] == id)
+                    return true;
+            return false;
         }
 
-        // Picks one entry, each with a chance proportional to its weight
-        uint32_t    PickWeighted(const Kind *const *pool, uint32_t n, uint32_t h)
+        // list: a load list as it sits in a course file, u16 ID and u16 zero per entry
+        bool    Listed(const uint8_t *list, uint32_t listSize, uint16_t id)
         {
-            uint32_t    total = 0;
+            for (uint32_t i = 0; i + 4 <= listSize; i += 4)
+                if (Read16(list + i) == id)
+                    return true;
+            return false;
+        }
 
-            for (uint32_t i = 0; i < n; ++i)
-                total += pool[i]->weight;
+        // The whole level as the plan sees it. The game loads what every area lists when the
+        // level starts, so a kind that one area brings along costs nothing in the others.
+        struct LevelState
+        {
+            bool        valid;
+            bool        vramPooled;
+            Plan        plan;
+            uint32_t    areaKey[MAX_AREAS];     // CRC of each course file the plan was made from
+            uint16_t    loaded[kMaxLoaded];     // every sprite ID an area of the level lists
+            uint32_t    loadedCount;
+        };
 
-            uint32_t    r = h % total;
+        LevelState  g_level;
 
-            for (uint32_t i = 0; i < n; ++i)
+        const KindCost  *FindCost(uint16_t id)
+        {
+            for (uint32_t i = 0; i < kKindCostCount; ++i)
+                if (kKindCosts[i].id == id)
+                    return &kKindCosts[i];
+            return nullptr;
+        }
+
+        const LevelRoom *FindRoom(uint32_t key)
+        {
+            for (uint32_t i = 0; i < kLevelRoomCount; ++i)
+                if (kLevelRooms[i].key == key)
+                    return &kLevelRooms[i];
+            return nullptr;
+        }
+
+        // Loaded by the level as it is, or added by the plan
+        bool    Available(uint16_t id)
+        {
+            return HasId(g_level.loaded, g_level.loadedCount, id)
+                || HasId(g_level.plan.fresh, g_level.plan.freshCount, id);
+        }
+
+        // The environment an enemy of the original level belongs to, SLOT_COUNT if it stays
+        uint32_t    SourceSlot(const uint8_t *spr, uint16_t id, const Settings &s)
+        {
+            const Plant *plant = FindPlant(id);
+
+            if (plant)
+                return s.swapPlants ? plant->slot : static_cast<uint32_t>(SLOT_COUNT);
+
+            const Kind  *k = FindKind(id);
+
+            if (!k || k->home > SLOT_WATER || !CanReplace(spr, id))
+                return SLOT_COUNT;
+            if ((k->home == SLOT_GROUND && !s.swapGround) || (k->home == SLOT_AIR && !s.swapAir)
+                || (k->home == SLOT_WATER && !s.swapWater))
+                return SLOT_COUNT;
+            return k->home;
+        }
+
+        // May this kind stand in this slot under the current settings
+        bool    Fills(uint16_t id, uint32_t slot, const Settings &s)
+        {
+            if (slot > SLOT_WATER)
             {
-                if (r < pool[i]->weight)
-                    return i;
-                r -= pool[i]->weight;
+                const Plant *plant = FindPlant(id);
+
+                return plant && plant->slot == slot;
             }
-            return n - 1;
+
+            const Kind  *k = FindKind(id);
+
+            return k && k->fill[slot] <= s.mode;
         }
 
         enum { kMaxPalette = kMaxPool };
@@ -354,33 +411,50 @@ namespace Rando
         {
             bool        built;
             uint32_t    count;
+            uint32_t    total;                  // sum of the weights
             const Kind  *items[kMaxPalette];
+            uint16_t    weights[kMaxPalette];
         };
 
-        // The kinds an area draws from. The game only has memory for about as many different
-        // models as the area was built with: loading 50 kinds where there were 21 corrupts it.
-        // So an area gets as many kinds as it had, plus a few, and every new roll brings others.
-        void    BuildPalette(Palette &pal, uint32_t slot, const Settings &s, uint32_t levelSeed,
-                             uint32_t want)
+        // The kinds an area draws from: what the level loads anyway and what the plan added.
+        // own is the load list the area came with, kinds that are not on it count as unusual.
+        void    BuildPalette(Palette &pal, uint32_t slot, const Settings &s, const uint8_t *own, uint32_t ownSize,
+                             bool usePlan)
         {
-            const Kind  *pool[kMaxPool];
-            uint32_t    n = BuildPool(slot, s, 0, pool);
-
-            if (want < 1)
-                want = 1;
-            if (want > n)
-                want = n;
-            for (uint32_t i = 0; i < want; ++i)
-            {
-                uint32_t    j = i + PickWeighted(pool + i, n - i, Hash(levelSeed, 0x51A7 + slot, i));
-                const Kind  *tmp = pool[i];
-
-                pool[i] = pool[j];
-                pool[j] = tmp;
-                pal.items[i] = pool[i];
-            }
-            pal.count = want;
+            pal.count = 0;
+            pal.total = 0;
             pal.built = true;
+            for (uint32_t i = 0; i < kKindCount && pal.count < kMaxPalette; ++i)
+            {
+                const Kind  &k = kKinds[i];
+                bool        usual;
+
+                if (k.fill[slot] > s.mode)
+                    continue;
+                usual = Listed(own, ownSize, k.id);
+                if (!usual && !(usePlan && Available(k.id)))
+                    continue;
+                pal.items[pal.count] = &k;
+                pal.weights[pal.count] = static_cast<uint16_t>(k.weight * (usual ? 1 : kUnusualBoost));
+                pal.total += pal.weights[pal.count];
+                ++pal.count;
+            }
+        }
+
+        const Kind  *PickFrom(const Palette &pal, uint32_t h)
+        {
+            if (!pal.count || !pal.total)
+                return nullptr;
+
+            uint32_t    r = h % pal.total;
+
+            for (uint32_t i = 0; i < pal.count; ++i)
+            {
+                if (r < pal.weights[i])
+                    return pal.items[i];
+                r -= pal.weights[i];
+            }
+            return pal.items[pal.count - 1];
         }
 
         // Something that never moves and cannot be stomped (a plant, an Amp, an Urchin) may only
@@ -447,23 +521,31 @@ namespace Rando
         s.enabled = 1;
         s.enemies = 1;
         s.levels = 1;
-        s.items = 1;
-        s.itemsExtra = 0;
         s.mode = MODE_CHAOS;
         s.perInstance = 1;
-        s.variety = 2;
+        s.castles = 1;
         s.rerollEachTry = 1;
         s.swapGround = 1;
         s.swapAir = 1;
         s.swapWater = 1;
         s.swapPlants = 1;
         s.notify = 0;
-        s.writeLog = 1;     // unused by the plugin now, the log is always written
+        s.autosave = 1;
+        s.noRepeats = 1;
+        s.itemRain = 0;
     }
 
-    void    SetForcedItem(uint16_t object)
+    void    SetRainProbe(uint32_t settings)
     {
-        g_forcedItem = object;
+        g_rainProbe = settings;
+    }
+
+    void    AddExtraKind(uint16_t id)
+    {
+        if (!id)
+            g_extraKindCount = 0;
+        else if (g_extraKindCount < 8)
+            g_extraKinds[g_extraKindCount++] = id;
     }
 
     void    SetForcedTarget(uint16_t id)
@@ -499,6 +581,7 @@ namespace Rando
     namespace
     {
         bool    g_dropSecretExit = false;
+        bool    g_nodeShuffled = false;
 
         bool    Contains(const uint16_t *list, uint32_t count, uint16_t code)
         {
@@ -539,126 +622,167 @@ namespace Rando
         return g_dropSecretExit;
     }
 
+    void    SetNodeShuffled(bool shuffled)
+    {
+        g_nodeShuffled = shuffled;
+    }
+
+    namespace
+    {
+        // The four kinds of levels that trade places, each only within itself. A level's slot is
+        // its position counted through all four lists, that is what Progress keeps a bit for.
+        struct LevelClass
+        {
+            const uint16_t  *list;
+            uint32_t        count;
+            uint32_t        firstSlot;
+        };
+
+        const LevelClass    kClasses[] =
+        {
+            { kLevelsNormal, kLevelsNormalCount, 0 },
+            { kLevelsSecret, kLevelsSecretCount, kLevelsNormalCount },
+            { kLevelsCastle, kLevelsCastleCount, kLevelsNormalCount + kLevelsSecretCount },
+            { kLevelsTower, kLevelsTowerCount, kLevelsNormalCount + kLevelsSecretCount + kLevelsCastleCount },
+            { kLevelsTowerSecret, kLevelsTowerSecretCount,
+              kLevelsNormalCount + kLevelsSecretCount + kLevelsCastleCount + kLevelsTowerCount },
+        };
+        const uint32_t      kClassCount = sizeof(kClasses) / sizeof(kClasses[0]);
+
+        Progress    *g_progress = nullptr;
+        bool        g_progressReset = false;
+
+        const LevelClass    *ClassOf(uint16_t code, uint32_t &index)
+        {
+            for (uint32_t c = 0; c < kClassCount; ++c)
+                for (uint32_t i = 0; i < kClasses[c].count; ++i)
+                    if (kClasses[c].list[i] == code)
+                    {
+                        index = i;
+                        return &kClasses[c];
+                    }
+            return nullptr;
+        }
+
+        bool    DoneSlot(const Progress &p, uint32_t slot)
+        {
+            return slot < LEVEL_SLOTS && (p.done[slot / 8] >> (slot % 8)) & 1;
+        }
+    }
+
+    int     LevelSlot(uint16_t code)
+    {
+        uint32_t            index = 0;
+        const LevelClass    *c = ClassOf(code, index);
+
+        return c ? static_cast<int>(c->firstSlot + index) : -1;
+    }
+
+    bool    IsDone(const Progress &p, uint16_t code)
+    {
+        int slot = LevelSlot(code);
+
+        return slot >= 0 && DoneSlot(p, static_cast<uint32_t>(slot));
+    }
+
+    void    MarkDone(Progress &p, uint16_t code)
+    {
+        int slot = LevelSlot(code);
+
+        if (slot >= 0 && slot < LEVEL_SLOTS)
+            p.done[slot / 8] = static_cast<uint8_t>(p.done[slot / 8] | (1 << (slot % 8)));
+    }
+
+    uint32_t    LeftOfItsKind(const Progress &p, uint16_t code)
+    {
+        uint32_t            index = 0;
+        const LevelClass    *c = ClassOf(code, index);
+        uint32_t            left = 0;
+
+        for (uint32_t i = 0; c && i < c->count; ++i)
+            left += !DoneSlot(p, c->firstSlot + i);
+        return left;
+    }
+
+    void    SetProgress(Progress *p)
+    {
+        g_progress = p;
+    }
+
+    bool    ProgressReset(void)
+    {
+        return g_progressReset;
+    }
+
     bool    ShuffleLevel(const Settings &s, uint32_t tries, uint32_t world, uint32_t number, uint32_t lastGiven,
                          uint32_t &outWorld, uint32_t &outNumber)
     {
-        uint16_t    code = static_cast<uint16_t>((world << 8) | number);
-        bool        normalNode = world <= 0xFF && number <= 0xFF && Contains(kLevelsNormal, kLevelsNormalCount, code);
-        bool        secretNode = world <= 0xFF && number <= 0xFF && Contains(kLevelsSecret, kLevelsSecretCount, code);
-        uint16_t    out = code;
+        uint16_t            code = static_cast<uint16_t>((world << 8) | number);
+        uint32_t            own = 0;
+        const LevelClass    *c = world <= 0xFF && number <= 0xFF ? ClassOf(code, own) : nullptr;
+        uint16_t            out = code;
 
         g_dropSecretExit = false;
-        if (!normalNode && !secretNode)
+        g_progressReset = false;
+
+        // Levels only trade places within their kind: ordinary levels, levels with a secret exit
+        // (so every secret path on the map has such a level on it), the castles of the
+        // Koopalings, the towers without and the towers with a secret exit. The castles of
+        // Bowser and everything else stay put.
+        if (!c)
+            return false;
+        if ((c->list == kLevelsCastle || c->list == kLevelsTower || c->list == kLevelsTowerSecret) && !s.castles)
             return false;
 
         if (!s.rerollEachTry)
         {
-            // The seed alone decides: levels trade places within their class, so every secret
-            // path on the map still has a level with a secret exit on it.
-            out = normalNode ? Permuted(kLevelsNormal, kLevelsNormalCount, 0, s.seed, code)
-                             : Permuted(kLevelsSecret, kLevelsSecretCount, 1, s.seed, code);
+            // the seed alone decides: one fixed permutation of each kind
+            out = Permuted(c->list, c->count, c->firstSlot, s.seed, code);
         }
         else
         {
-            // A new roll on every visit: any level may come up anywhere. A place with a secret
-            // path draws a level that has a secret exit one time in three, so that path stays
-            // reachable. The level that came up last is skipped, nobody wants it twice in a row.
-            const uint32_t  total = kLevelsNormalCount + kLevelsSecretCount;
-            uint32_t        h = Hash(s.seed, 0x1E7E1, tries);
-            bool            secretOnly = secretNode && Hash(s.seed, 0x5EC2E7, tries) % 3 == 0;
-            uint32_t        count = secretOnly ? kLevelsSecretCount : total;
+            // A new roll on every visit. The level that belongs to the place is skipped, that
+            // would not feel shuffled, and so is the one that came up last. With a list of
+            // finished levels those are skipped as well, until the kind has run out of others,
+            // then it starts over.
+            uint32_t    h = Hash(s.seed, 0x1E7E1 + c->firstSlot, tries);
+            bool        found = false;
 
-            for (uint32_t step = 0; step < count; ++step)
+            for (uint32_t pass = 0; pass < 2 && !found; ++pass)
             {
-                uint32_t    i = (h + step) % count;
+                bool    fresh = pass == 0 && g_progress != nullptr;
 
-                out = secretOnly ? kLevelsSecret[i]
-                                 : (i < kLevelsNormalCount ? kLevelsNormal[i] : kLevelsSecret[i - kLevelsNormalCount]);
-                if (out != lastGiven)
-                    break;
+                if (pass == 0 && !fresh)
+                    continue;
+                for (uint32_t step = 0; step < c->count && !found; ++step)
+                {
+                    uint32_t    i = (h + step) % c->count;
+
+                    out = c->list[i];
+                    found = out != lastGiven && out != code && !(fresh && DoneSlot(*g_progress, c->firstSlot + i));
+                }
+                if (!found && fresh)
+                {
+                    // every other level of this kind is finished: wipe the marks of the kind
+                    for (uint32_t i = 0; i < c->count; ++i)
+                    {
+                        uint32_t    slot = c->firstSlot + i;
+
+                        g_progress->done[slot / 8] = static_cast<uint8_t>(g_progress->done[slot / 8] & ~(1 << (slot % 8)));
+                    }
+                    g_progressReset = true;
+                }
             }
+            if (!found)
+                out = c->list[(h + 1) % c->count];
         }
 
-        // A secret exit taken where the map has no secret path leads nowhere, so that goal is
-        // taken out when such a level lands on an ordinary place.
-        g_dropSecretExit = normalNode && Contains(kLevelsSecret, kLevelsSecretCount, out);
+        // A secret exit taken where the map has no secret path leads nowhere. Levels stay within
+        // their kind, so this cannot come up any more, the check stays as a safety net.
+        g_dropSecretExit = c->list == kLevelsNormal && Contains(kLevelsSecret, kLevelsSecretCount, out);
         outWorld = out >> 8;
         outNumber = out & 0xFF;
         return true;
-    }
-
-    uint32_t    RandomizeItems(uint8_t *bgdat, uint32_t size, const Settings &s, uint32_t seed)
-    {
-        const uint32_t  kMaxBlocks = 96;
-        uint32_t        changed = 0;
-
-        (void)s;
-
-        // testing: question blocks are objects 30 to 40 of the standard tileset
-        if (g_forcedItem)
-        {
-            for (uint32_t off = 0; off + kTileObjectSize <= size; off += kTileObjectSize)
-            {
-                uint16_t    id = Read16(bgdat + off);
-
-                if (id == 0xFFFF)
-                    break;
-                if (id >= 30 && id <= 40 && id != g_forcedItem)
-                {
-                    Write16(bgdat + off, g_forcedItem);
-                    ++changed;
-                }
-            }
-            return changed;
-        }
-
-        // One block type at a time: the power-up blocks of that type trade their contents.
-        // A block never receives an item the level did not already have. The game only seems
-        // to prepare the items a level was built with, anything else left the block empty.
-        for (uint32_t r = 0; r < sizeof(kItemRows) / sizeof(kItemRows[0]); ++r)
-        {
-            const ItemRow   &row = kItemRows[r];
-            const uint16_t  ids[5] = { row.fire, row.leaf, row.star, row.oneUp, row.gold };
-            uint32_t        where[kMaxBlocks];
-            uint16_t        what[kMaxBlocks];
-            uint32_t        n = 0;
-
-            for (uint32_t off = 0; off + kTileObjectSize <= size && n < kMaxBlocks; off += kTileObjectSize)
-            {
-                uint16_t    id = Read16(bgdat + off);
-                bool        match = (r == 1 && id == kBrickStarAlt);
-
-                if (id == 0xFFFF)
-                    break;
-                // the Mini Mushroom is not in the list: some levels cannot be finished without it
-                for (uint32_t i = 0; i < 5 && !match; ++i)
-                    match = ids[i] == id;
-                if (match)
-                {
-                    where[n] = off;
-                    what[n] = id;
-                    ++n;
-                }
-            }
-
-            for (uint32_t k = n; k > 1; --k)
-            {
-                uint32_t    j = Hash(seed, 0x17E5 + r, k) % k;
-                uint16_t    tmp = what[k - 1];
-
-                what[k - 1] = what[j];
-                what[j] = tmp;
-            }
-            for (uint32_t i = 0; i < n; ++i)
-            {
-                if (Read16(bgdat + where[i]) != what[i])
-                {
-                    Write16(bgdat + where[i], what[i]);
-                    ++changed;
-                }
-            }
-        }
-        return changed;
     }
 
     uint32_t    CourseSize(const uint8_t *course)
@@ -676,6 +800,222 @@ namespace Rando
                 end = off + size;
         }
         return end;
+    }
+
+    const Plan  &LastPlan(void)
+    {
+        return g_level.plan;
+    }
+
+    void    PlanLevel(const uint8_t *const *courses, const uint32_t *sizes, const Settings &s,
+                      uint32_t levelSeed, bool vramPooled)
+    {
+        LevelState  &lv = g_level;
+        uint32_t    heads[SLOT_COUNT];
+        uint32_t    fixedHeads[SLOT_COUNT];     // those of them that never move, see AvoidBlocking
+
+        std::memset(&lv, 0, sizeof(lv));
+        std::memset(heads, 0, sizeof(heads));
+        std::memset(fixedHeads, 0, sizeof(fixedHeads));
+        lv.valid = true;
+        lv.vramPooled = vramPooled;
+
+        for (uint32_t a = 0; a < MAX_AREAS; ++a)
+        {
+            const uint8_t   *course = courses[a];
+            uint32_t        size = sizes[a];
+
+            if (!course || size < kHeaderSize)
+                continue;
+
+            uint32_t    sprOff = Read32(course + kBlockSprites * 8);
+            uint32_t    sprSize = Read32(course + kBlockSprites * 8 + 4);
+            uint32_t    usedOff = Read32(course + kBlockUsed * 8);
+            uint32_t    usedSize = Read32(course + kBlockUsed * 8 + 4);
+
+            if (sprOff + sprSize > size || usedOff + usedSize > size)
+                continue;
+            lv.areaKey[a] = Crc32(course, size);
+            for (uint32_t i = 0; i + 4 <= usedSize; i += 4)
+            {
+                uint16_t    id = Read16(course + usedOff + i);
+
+                if (!HasId(lv.loaded, lv.loadedCount, id) && lv.loadedCount < kMaxLoaded)
+                    lv.loaded[lv.loadedCount++] = id;
+            }
+            for (uint32_t i = 0; (i + 1) * kSpriteSize <= sprSize; ++i)
+            {
+                const uint8_t   *spr = course + sprOff + i * kSpriteSize;
+                uint16_t        id = Read16(spr);
+
+                if (id == 0xFFFF)
+                    break;
+
+                uint32_t    slot = SourceSlot(spr, id, s);
+
+                if (slot < SLOT_COUNT)
+                {
+                    const Kind  *k = FindKind(id);
+
+                    ++heads[slot];
+                    if (k && k->fixed)
+                        ++fixedHeads[slot];
+                }
+            }
+        }
+        lv.plan.key = lv.areaKey[0];
+
+        // A level that is not in the table keeps to the kinds it has, those cost nothing
+        const LevelRoom *room = FindRoom(lv.plan.key);
+
+        if (!room || !s.enemies)
+            return;
+        lv.plan.known = 1;
+
+        uint32_t    left[MEM_COUNT];
+        uint32_t    spent[MEM_COUNT];
+
+        for (uint32_t r = 0; r < MEM_COUNT; ++r)
+        {
+            lv.plan.freeBefore[r] = room->free[r];
+            left[r] = room->free[r] > kReserve[r] ? room->free[r] - kReserve[r] : 0;
+            spent[r] = 0;
+        }
+
+        // with pooling one bank takes what the other cannot hold, so only the sum counts
+        uint32_t    vramReserve = kReserve[MEM_VRAM_A] + kReserve[MEM_VRAM_B];
+        uint32_t    vramLeft = room->both > vramReserve ? room->both - vramReserve : 0;
+
+        // The item rain comes first if it was asked for: the spawner and the items it throws
+        // have to be loaded like any other kind. A level without room for them stays dry.
+        if (s.itemRain)
+        {
+            const KindCost  *cost = FindCost(kItemSpawner);
+            bool            fits = cost != nullptr && !HasId(lv.loaded, lv.loadedCount, kItemSpawner);
+
+            // a level that has the spawner anyway gets its rain for free
+            if (HasId(lv.loaded, lv.loadedCount, kItemSpawner))
+                lv.plan.rain = 1;
+            for (uint32_t r = 0; fits && r < MEM_VRAM_A; ++r)
+                fits = cost->cost[r] <= left[r];
+            if (fits && vramPooled)
+                fits = static_cast<uint32_t>(cost->cost[MEM_VRAM_A]) + cost->cost[MEM_VRAM_B] <= vramLeft;
+            else if (fits)
+                fits = cost->cost[MEM_VRAM_A] <= left[MEM_VRAM_A] && cost->cost[MEM_VRAM_B] <= left[MEM_VRAM_B];
+            if (fits)
+            {
+                lv.plan.rain = 1;
+                for (uint32_t m = 0; m < MEM_COUNT; ++m)
+                {
+                    spent[m] += cost->cost[m];
+                    left[m] = left[m] > cost->cost[m] ? left[m] - cost->cost[m] : 0;
+                }
+                vramLeft -= vramPooled ? cost->cost[MEM_VRAM_A] + cost->cost[MEM_VRAM_B] : 0;
+            }
+        }
+        bool        closed[SLOT_COUNT];
+
+        std::memset(closed, 0, sizeof(closed));
+        while (lv.plan.freshCount < kMaxFreshKinds && lv.plan.freshCount < MAX_FRESH)
+        {
+            // The next new kind goes to the environment with the most enemies per kind it can
+            // draw on. Compared without dividing.
+            uint32_t    best = SLOT_COUNT;
+            uint32_t    bestChoices = 0;
+
+            for (uint32_t slot = 0; slot < SLOT_COUNT; ++slot)
+            {
+                if (!heads[slot] || closed[slot])
+                    continue;
+
+                uint32_t    choices = 1;
+
+                if (slot <= SLOT_WATER)
+                {
+                    for (uint32_t i = 0; i < kKindCount; ++i)
+                        choices += kKinds[i].fill[slot] <= s.mode && Available(kKinds[i].id);
+                }
+                else
+                {
+                    for (uint32_t i = 0; i < kPlantCount; ++i)
+                        choices += kPlants[i].slot == slot && Available(kPlants[i].id);
+                }
+                if (best == SLOT_COUNT || heads[slot] * bestChoices > heads[best] * choices)
+                {
+                    best = slot;
+                    bestChoices = choices;
+                }
+            }
+            if (best == SLOT_COUNT)
+                break;
+
+            // what could come in for that environment and still fits into every pool
+            uint16_t    ids[kMaxPool];
+            uint16_t    weights[kMaxPool];
+            uint32_t    n = 0;
+            uint32_t    total = 0;
+
+            for (uint32_t i = 0; i < kKindCount + kPlantCount && n < kMaxPool; ++i)
+            {
+                uint16_t        id = i < kKindCount ? kKinds[i].id : kPlants[i - kKindCount].id;
+                const KindCost  *cost = FindCost(id);
+                bool            fits = cost != nullptr && Fills(id, best, s) && !Available(id);
+
+                // something that never moves only ever replaces its like, without one of those
+                // in the level it would be loaded for nothing
+                if (fits && i < kKindCount && kKinds[i].fixed && !fixedHeads[best])
+                    fits = false;
+
+                for (uint32_t r = 0; fits && r < MEM_VRAM_A; ++r)
+                    fits = cost->cost[r] <= left[r];
+                if (fits && vramPooled)
+                    fits = static_cast<uint32_t>(cost->cost[MEM_VRAM_A]) + cost->cost[MEM_VRAM_B] <= vramLeft;
+                else if (fits)
+                    fits = cost->cost[MEM_VRAM_A] <= left[MEM_VRAM_A] && cost->cost[MEM_VRAM_B] <= left[MEM_VRAM_B];
+                if (!fits)
+                    continue;
+                ids[n] = id;
+                weights[n] = i < kKindCount ? kKinds[i].weight : 1;
+                total += weights[n];
+                ++n;
+            }
+            if (!n)
+            {
+                closed[best] = true;
+                continue;
+            }
+
+            uint32_t    r = Hash(levelSeed, 0x51A7 + best, lv.plan.freshCount) % total;
+            uint32_t    pick = 0;
+
+            while (pick + 1 < n && r >= weights[pick])
+                r -= weights[pick++];
+
+            const KindCost  *cost = FindCost(ids[pick]);
+
+            lv.plan.fresh[lv.plan.freshCount++] = ids[pick];
+            for (uint32_t m = 0; m < MEM_COUNT; ++m)
+            {
+                spent[m] += cost->cost[m];
+                left[m] = left[m] > cost->cost[m] ? left[m] - cost->cost[m] : 0;
+            }
+            vramLeft -= vramPooled ? cost->cost[MEM_VRAM_A] + cost->cost[MEM_VRAM_B] : 0;
+        }
+
+        for (uint32_t r = 0; r < MEM_COUNT; ++r)
+            lv.plan.freeAfter[r] = static_cast<uint16_t>(room->free[r] > spent[r] ? room->free[r] - spent[r] : 0);
+        if (vramPooled)
+        {
+            // what one bank cannot hold comes out of the other
+            for (uint32_t r = MEM_VRAM_A; r <= MEM_VRAM_B; ++r)
+            {
+                uint32_t    other = r == MEM_VRAM_A ? MEM_VRAM_B : MEM_VRAM_A;
+                uint32_t    over = spent[r] > room->free[r] ? spent[r] - room->free[r] : 0;
+
+                lv.plan.freeAfter[other] = static_cast<uint16_t>(lv.plan.freeAfter[other] > over
+                                                                 ? lv.plan.freeAfter[other] - over : 0);
+            }
+        }
     }
 
     bool    RandomizeCourse(const uint8_t *course, uint32_t size, uint8_t *out, uint32_t outCap,
@@ -703,64 +1043,19 @@ namespace Rando
 
         Palette     palettes[SLOT_WATER + 1];
         bool        forcedUsed = false;
+        bool        touched = false;
+
+        // The plan only counts if it was made for this very level. Without one the area keeps
+        // to the kinds on its own load list, which cost nothing.
+        bool        usePlan = g_level.valid && areaIndex < MAX_AREAS
+                           && (g_level.areaKey[areaIndex] == Crc32(course, size)
+                               || (areaIndex > 0 && g_level.areaKey[areaIndex] == 0));
 
         // A checkpoint sends you back to a spot of the level it was taken in. Once the same place
         // on the map can load another level (a new roll, a changed seed), that spot may not exist
-        // there, so with random levels the flags go out of reach altogether.
-        bool        dropCheckpoints = s.levels != 0;
-
-        // how many different swappable kinds and how many enemies each environment has in this area
-        uint32_t    sourceKinds[SLOT_WATER + 1] = { 0, 0, 0 };
-        uint32_t    heads[SLOT_WATER + 1] = { 0, 0, 0 };
-        uint32_t    extraKinds[SLOT_WATER + 1] = { 0, 0, 0 };
-        uint16_t    seen[kMaxPool];
-        uint32_t    seenCount = 0;
-
-        for (uint32_t i = 0; i < count; ++i)
-        {
-            const uint8_t   *spr = out + sprOff + i * kSpriteSize;
-            uint16_t        id = Read16(spr);
-            const Kind      *k = FindKind(id);
-            bool            known = false;
-
-            if (!k || k->home > SLOT_WATER || !CanReplace(spr, id))
-                continue;
-            ++heads[k->home];
-            for (uint32_t n = 0; n < seenCount && !known; ++n)
-                known = seen[n] == id;
-            if (!known && seenCount < kMaxPool)
-            {
-                seen[seenCount++] = id;
-                ++sourceKinds[k->home];
-            }
-        }
-
-        // The extra kinds the area can afford go where the enemies are: one at a time to the
-        // environment that has the most enemies per kind it may draw from.
-        uint32_t    kindsBefore = usedSize / 4;
-        uint32_t    budget = kindsBefore + kMinExtraKinds >= kSafeKindTotal ? kMinExtraKinds
-                                                                             : kSafeKindTotal - kindsBefore;
-
-        if (budget > kMaxExtraKinds)
-            budget = kMaxExtraKinds;
-        for (; budget; --budget)
-        {
-            uint32_t    best = SLOT_COUNT;
-
-            for (uint32_t slot = 0; slot <= SLOT_WATER; ++slot)
-            {
-                if (!heads[slot])
-                    continue;
-                // compares heads / (kinds drawn from) without dividing
-                if (best == SLOT_COUNT
-                    || heads[slot] * (sourceKinds[best] + extraKinds[best])
-                       > heads[best] * (sourceKinds[slot] + extraKinds[slot]))
-                    best = slot;
-            }
-            if (best == SLOT_COUNT)
-                break;
-            ++extraKinds[best];
-        }
+        // there, so the flags go out of reach wherever levels are shuffled. Towers and whatever
+        // else stays put keep theirs.
+        bool        dropCheckpoints = s.levels != 0 && g_nodeShuffled;
 
         std::memset(palettes, 0, sizeof(palettes));
         res.total = static_cast<uint16_t>(count);
@@ -772,11 +1067,13 @@ namespace Rando
             uint16_t    id = Read16(spr);
             uint32_t    h = Hash(levelSeed, (areaIndex << 16) + i, 0xC0FFEE);
 
-            // goal pole with the red flag: nybble 4 marks the secret exit
+            // Goal pole with the red flag: nybble 4 marks the secret exit. Where the map has no
+            // secret path it turns into an ordinary goal, so the room it stands in still has
+            // a way out.
             if (id == 97 && g_dropSecretExit && (spr[11] >> 4))
             {
-                Write16(spr + 4, 0xF000);
-                ++res.checkpoints;
+                spr[11] &= 0x0F;
+                touched = true;
                 continue;
             }
             if (id == kCheckpointFlag)
@@ -807,17 +1104,19 @@ namespace Rando
                 if (!s.swapPlants)
                     continue;
 
-                // other plants of the same direction, settings are kept
+                // other plants of the same direction that the level has loaded, settings are kept
                 uint16_t    others[4];
                 uint32_t    n = 0;
 
-                for (uint32_t p = 0; p < kPlantCount; ++p)
-                    if (kPlants[p].slot == plant->slot && kPlants[p].id != id)
+                for (uint32_t p = 0; p < kPlantCount && n < 4; ++p)
+                    if (kPlants[p].slot == plant->slot && kPlants[p].id != id
+                        && ((usePlan && Available(kPlants[p].id))
+                            || Listed(course + usedOff, usedSize, kPlants[p].id)))
                         others[n++] = kPlants[p].id;
                 if (!n)
                     continue;
 
-                // always kind for kind, so pipe plants never add to the number of kinds
+                // always kind for kind and the same in every area of the level
                 uint16_t    to = others[Hash(levelSeed, 0x9172, id) % n];
 
                 Write16(spr, to);
@@ -848,24 +1147,15 @@ namespace Rando
                 forcedUsed = true;
                 dst = FindKind(g_forced);
             }
-            else if (s.perInstance)
+            else
             {
                 Palette &pal = palettes[slot];
 
                 if (!pal.built)
-                    BuildPalette(pal, slot, s, levelSeed ^ (areaIndex * 0x9E3779B9u),
-                                 sourceKinds[slot] + extraKinds[slot]);
-                if (pal.count)
-                    dst = AvoidBlocking(*src, pal.items[PickWeighted(pal.items, pal.count, h)],
-                                        pal.items, pal.count);
-            }
-            else
-            {
-                const Kind  *pool[kMaxPool];
-                uint32_t    n = BuildPool(slot, s, id, pool);
-
-                if (n)
-                    dst = AvoidBlocking(*src, pool[PickWeighted(pool, n, Hash(levelSeed, 0x7A31, id))], pool, n);
+                    BuildPalette(pal, slot, s, course + usedOff, usedSize, usePlan);
+                // every enemy on its own, or every enemy of a kind the same way
+                dst = AvoidBlocking(*src, PickFrom(pal, s.perInstance ? h : Hash(levelSeed, 0x7A31, id)),
+                                    pal.items, pal.count);
             }
 
             if (!dst || dst->id == id)
@@ -880,32 +1170,122 @@ namespace Rando
             Record(res, id, dst->id);
         }
 
-        if (!res.swapped && !res.checkpoints && !res.rings)
+        // Item rain: spawners along the top of every zone, and further rows below in tall zones
+        static uint8_t  rain[kMaxRain][kSpriteSize];
+        uint32_t        rainCount = 0;
+        uint32_t        zoneOff = Read32(course + kBlockZones * 8);
+        uint32_t        zoneSize = Read32(course + kBlockZones * 8 + 4);
+
+        // testing: a few spawners right next to where the level starts, their settings (bytes 8
+        // to 10 of the sprite) come from the probe value, each one with another item
+        if (g_rainProbe && s.itemRain && areaIndex == 0)
+        {
+            uint32_t        entOff = Read32(course + 6 * 8), entSize = Read32(course + 6 * 8 + 4);
+            uint32_t        setOff = Read32(course + 1 * 8);
+            uint8_t         start = course[setOff + 0x10];
+
+            for (uint32_t e = 0; (e + 1) * 24 <= entSize; ++e)
+            {
+                const uint8_t   *ent = course + entOff + e * 24;
+
+                if (ent[8] != start)
+                    continue;
+                // top byte of the probe value: how many spawners (high nybble, 0 = four) and
+                // which item (low nybble, 0 = a different one each)
+                uint32_t    many = (g_rainProbe >> 28) ? (g_rainProbe >> 28) : 4;
+                uint32_t    item = (g_rainProbe >> 24) & 0xF;
+
+                for (uint32_t i = 0; i < many && i < 4; ++i)
+                {
+                    uint8_t *spr = rain[rainCount++];
+
+                    std::memset(spr, 0, kSpriteSize);
+                    Write16(spr, kItemSpawner);
+                    Write16(spr + 2, static_cast<uint16_t>(Read16(ent) + 64 + i * 64));
+                    Write16(spr + 4, static_cast<uint16_t>(Read16(ent + 2) > 96 ? Read16(ent + 2) - 96 : 0));
+                    spr[11] = static_cast<uint8_t>((item ? item : kRainItems[i * 2 % sizeof(kRainItems)]) << 4);
+                    spr[10] = static_cast<uint8_t>(g_rainProbe >> 16);
+                    spr[9] = static_cast<uint8_t>(g_rainProbe >> 8);
+                    spr[8] = static_cast<uint8_t>(g_rainProbe);
+                    spr[16] = ent[13];
+                }
+                break;
+            }
+        }
+        else if (s.itemRain && usePlan && g_level.plan.rain && zoneOff + zoneSize <= size)
+        {
+            for (uint32_t z = 0; (z + 1) * kZoneSize <= zoneSize; ++z)
+            {
+                const uint8_t   *zone = course + zoneOff + z * kZoneSize;
+                uint32_t        zx = Read16(zone), zy = Read16(zone + 2);
+                uint32_t        zw = Read16(zone + 4), zh = Read16(zone + 6);
+
+                for (uint32_t y = zy + 32; y == zy + 32 || y + 5 * 16 < zy + zh; y += kRainRows)
+                {
+                    for (uint32_t x = zx + 4 * 16; x + 4 * 16 < zx + zw && rainCount < kMaxRain; x += kRainStep)
+                    {
+                        uint32_t    h = Hash(levelSeed, 0x4A1B00 + (areaIndex << 8) + rainCount, x + y);
+                        uint8_t     *spr = rain[rainCount++];
+
+                        std::memset(spr, 0, kSpriteSize);
+                        Write16(spr, kItemSpawner);
+                        // a little off the grid, so the rows do not look like rows
+                        Write16(spr + 2, static_cast<uint16_t>(x + (h >> 8) % 48));
+                        Write16(spr + 4, static_cast<uint16_t>(y));
+                        spr[11] = static_cast<uint8_t>(kRainItems[h % sizeof(kRainItems)] << 4);
+                        spr[10] = static_cast<uint8_t>((1 << 4) | 6);                   // thrown, uneven rhythm
+                        spr[9] = static_cast<uint8_t>((4 << 4) | 12);                   // some delay, twelve items
+                        spr[8] = static_cast<uint8_t>((((h >> 16) & 1) ? 4 : 0) << 4 | (((h >> 17) & 1) ? 2 : 0));
+                        spr[16] = zone[12];
+                    }
+                }
+            }
+        }
+
+        if (!res.swapped && !res.checkpoints && !res.rings && !touched && !rainCount
+            && !(g_extraKindCount && areaIndex == 0))
             return false;
 
-        // Rebuild the load list: every kind now present, sorted ascending
+        // The new load list is the old one plus whatever came in. Nothing is ever taken off it:
+        // other things in the level can depend on what a kind loads, and the memory budget of
+        // the plan is measured against the level as it was built.
         uint16_t    types[kMaxTypes];
         uint32_t    typeCount = 0;
 
+        for (uint32_t i = 0; i + 4 <= usedSize; i += 4)
+            AddType(types, typeCount, Read16(course + usedOff + i));
         for (uint32_t i = 0; i < count; ++i)
             AddType(types, typeCount, Read16(out + sprOff + i * kSpriteSize));
-
-        for (uint32_t i = 0; i + 4 <= usedSize; i += 4)
-        {
-            uint16_t    id = Read16(course + usedOff + i);
-
-            for (uint32_t g = 0; g < sizeof(kGeneratorSpawns) / sizeof(kGeneratorSpawns[0]); ++g)
-                if (id == kGeneratorSpawns[g])
-                    AddType(types, typeCount, id);
-        }
+        // testing: kinds that are loaded without standing anywhere, to measure what one costs
+        for (uint32_t i = 0; areaIndex == 0 && i < g_extraKindCount; ++i)
+            AddType(types, typeCount, g_extraKinds[i]);
 
         uint32_t    newOff = (size + 3) & ~3u;
         uint32_t    newSize = typeCount * 4;
 
         if (newOff + newSize > outCap)
             return false;
-
         std::memset(out + size, 0, newOff - size);
+
+        // The spawners need a longer sprite list. It goes behind the file as well: the sprites
+        // as they are now, the spawners, and the end mark the old list closed with.
+        uint32_t    tail = sprSize - count * kSpriteSize;
+        uint32_t    rainSize = (count + rainCount) * kSpriteSize + tail;
+
+        if (rainCount && newOff + ((rainSize + 3) & ~3u) + newSize + 4 <= outCap)
+        {
+            std::memcpy(out + newOff, out + sprOff, count * kSpriteSize);
+            std::memcpy(out + newOff + count * kSpriteSize, rain, rainCount * kSpriteSize);
+            std::memcpy(out + newOff + (count + rainCount) * kSpriteSize, course + sprOff + count * kSpriteSize, tail);
+            Write32(out + kBlockSprites * 8, newOff);
+            Write32(out + kBlockSprites * 8 + 4, rainSize);
+            res.rain = static_cast<uint16_t>(rainCount);
+            AddType(types, typeCount, kItemSpawner);
+            newSize = typeCount * 4;
+            newOff += rainSize;
+            std::memset(out + newOff, 0, ((newOff + 3) & ~3u) - newOff);
+            newOff = (newOff + 3) & ~3u;
+        }
         for (uint32_t i = 0; i < typeCount; ++i)
         {
             Write16(out + newOff + i * 4, types[i]);

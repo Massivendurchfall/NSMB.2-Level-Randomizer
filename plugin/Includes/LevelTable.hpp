@@ -26,6 +26,24 @@ namespace Rando
     };
     const uint32_t kLevelsSecretCount = sizeof(kLevelsSecret) / sizeof(kLevelsSecret[0]);
 
+    const uint16_t kLevelsCastle[] =
+    {
+        0x0110, 0x0210, 0x0310, 0x0410, 0x0510, 0x0710, 0x0810,
+    };
+    const uint32_t kLevelsCastleCount = sizeof(kLevelsCastle) / sizeof(kLevelsCastle[0]);
+
+    const uint16_t kLevelsTower[] =
+    {
+        0x020E, 0x050E, 0x060E,
+    };
+    const uint32_t kLevelsTowerCount = sizeof(kLevelsTower) / sizeof(kLevelsTower[0]);
+
+    const uint16_t kLevelsTowerSecret[] =
+    {
+        0x010E, 0x030E, 0x040E,
+    };
+    const uint32_t kLevelsTowerSecretCount = sizeof(kLevelsTowerSecret) / sizeof(kLevelsTowerSecret[0]);
+
 }
 
 #endif

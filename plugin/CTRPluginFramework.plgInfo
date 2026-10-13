@@ -2,8 +2,8 @@ Author: Juju
 
 Version: # Plugin version
     Major: 0
-    Minor: 4
-    Revision: 7
+    Minor: 5
+    Revision: 0
 
 Targets: # Low TitleId of games which are compatibles with this plugin (0 for all)
     - 0x0007AF00
